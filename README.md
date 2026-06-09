@@ -121,6 +121,11 @@ The tile, routing and geocoding servers **wait** for their data (sentinels / the
 
 ### 5. Verify each service
 
+`docker compose ps` mirrors these checks: every service except the batch
+`data-pipeline` has a **healthcheck** based on this smoke test, so engines show
+`(healthy)` once they actually answer — and stay `starting`/`unhealthy` while
+their first data build is still running.
+
 ```bash
 curl -s  http://localhost:8000/                  | head -c 80                     # app HTML
 curl -s  http://localhost:8000/martin/ethiopia-latest | head -c 120               # Martin TileJSON
