@@ -6,13 +6,20 @@
 #      docker compose up -d
 #      open http://localhost:8000
 #
-#  Endpoints once the pipeline has finished its first build:
-#      :8000  web showcase            :3000  Martin vector tiles (TileJSON /ethiopia-latest)
-#      :5000  OSRM routing            :8080  Nominatim geocoding (via CORS proxy)
+#  Everything is reached through the single :8000 nginx gateway — no backend
+#  is published to the host:
+#      :8000/         web showcase          :8000/docs/        API reference
+#      :8000/tiles/   Martin vector tiles   :8000/osrm/        OSRM routing
+#      :8000/photon/  Photon autocomplete   :8000/nominatim/   Nominatim geocoder
+#      :8000/vroom/   VROOM optimization (POST)
 #
 #  First boot does a heavy one-time build (Planetiler + OSRM + Nominatim import).
-#  The tile/routing servers WAIT for the pipeline (sentinel files) instead of
-#  crash-looping, so an empty ./data on first `up` is handled gracefully.
+#  Every engine WAITS for its data (sentinel files / the validated PBF) instead
+#  of crash-looping, so an empty ./data on first `up` is handled gracefully.
+#
+#  All images are PINNED for reproducible builds — bump them deliberately. The
+#  pipeline's OSRM_IMAGE and the routing-engine image must move in LOCKSTEP:
+#  the graph format is version-specific.
 # ==========================================================================
 name: open-karta
 
@@ -27,12 +34,14 @@ volumes:
 services:
   # ---------------------------------------------------------------------------
   # 1) Data pipeline & orchestrator
-  #    Alpine + curl + docker-cli. Talks to the HOST docker daemon via the
-  #    mounted socket to launch transient build containers, then hot-reloads
-  #    the tile + routing servers. Loops every $INTERVAL seconds (24h default).
+  #    Pinned alpine + curl + docker-cli (pipeline/Dockerfile). Talks to the
+  #    HOST docker daemon via the mounted socket — root-equivalent access to
+  #    the host (see the README "Heads up") — to launch transient build
+  #    containers, then hot-reloads the engines whose data actually changed.
+  #    Loops every $INTERVAL seconds (24h default).
   # ---------------------------------------------------------------------------
   data-pipeline:
-    image: alpine:latest
+    build: ./pipeline
     container_name: ok_data_pipeline
     restart: unless-stopped
     networks: [karta-network]
@@ -41,10 +50,17 @@ services:
       # Absolute HOST path to ./data. REQUIRED: sibling containers launched via
       # the docker socket resolve bind-mount sources on the HOST, not in this
       # container, so "$(pwd)/data" from inside here would point nowhere.
-      HOST_DATA_DIR: "${PWD:-/home/sam/Desktop/openkarta.et/basic}/data"
+      # `:?` makes compose fail fast instead of silently mounting a wrong path.
+      HOST_DATA_DIR: "${PWD:?run docker compose from the project root so PWD resolves to it}/data"
       PBF_URL: "https://download.geofabrik.de/africa/ethiopia-latest.osm.pbf"
       INTERVAL: "86400"
       PLANETILER_XMX: "4g"
+      # Pinned builder images. OSRM_IMAGE MUST match the routing-engine image
+      # below — the graph format is version-specific.
+      PLANETILER_IMAGE: "ghcr.io/onthegomap/planetiler:0.8.2"
+      OSRM_IMAGE: "osrm/osrm-backend:v5.27.1"
+      # Rebuild Photon's index from Nominatim when older than this (0 = never).
+      PHOTON_REINDEX_DAYS: "7"
     volumes:
       - ./data:/data
       - ./pipeline/run.sh:/run.sh:ro
@@ -57,7 +73,7 @@ services:
   #    on a freshly-empty ./data volume.
   # ---------------------------------------------------------------------------
   tile-server:
-    image: ghcr.io/maplibre/martin:latest
+    image: ghcr.io/maplibre/martin:v0.14.2
     container_name: ok_tile_server
     restart: unless-stopped
     networks: [karta-network]
@@ -79,9 +95,10 @@ services:
   # ---------------------------------------------------------------------------
   # 3) Routing engine (OSRM) — car profile, MLD algorithm.
   #    Waits for the pipeline's .osrm_ready sentinel before serving.
+  #    Image must stay in lockstep with the pipeline's OSRM_IMAGE (above).
   # ---------------------------------------------------------------------------
   routing-engine:
-    image: osrm/osrm-backend:latest
+    image: osrm/osrm-backend:v5.27.1
     container_name: ok_routing_engine
     restart: unless-stopped
     networks: [karta-network]
@@ -98,10 +115,12 @@ services:
     command: []
 
   # ---------------------------------------------------------------------------
-  # 4) Geocoder (Nominatim). Self-imports from Geofabrik via PBF_URL so it can
-  #    never crash-loop waiting on the shared file (guardrail: graceful empty
-  #    state). Internal only — reached via the :8000 proxy at /nominatim/
-  #    (which also normalises CORS, so no separate shim is needed).
+  # 4) Geocoder (Nominatim). Waits for the pipeline's validated extract
+  #    (.pbf_ok) instead of restart-looping on a missing file, imports it once
+  #    (PBF_PATH), then keeps itself fresh by applying Geofabrik's daily
+  #    Ethiopia diffs in-container (REPLICATION_URL + UPDATE_MODE=continuous).
+  #    Internal only — reached via the :8000 proxy at /nominatim/ (which also
+  #    normalises CORS, so no separate shim is needed).
   # ---------------------------------------------------------------------------
   geocoder:
     image: mediagis/nominatim:4.5
@@ -110,7 +129,11 @@ services:
     networks: [karta-network]
     environment:
       PBF_PATH: "/data/ethiopia-latest.osm.pbf"
-      NOMINATIM_PASSWORD: "openkarta"
+      REPLICATION_URL: "https://download.geofabrik.de/africa/ethiopia-updates/"
+      UPDATE_MODE: "continuous"            # apply diffs forever, in-container
+      REPLICATION_UPDATE_INTERVAL: "86400" # Geofabrik publishes daily diffs
+      REPLICATION_RECHECK_INTERVAL: "900"  # poll cadence when none are pending
+      NOMINATIM_PASSWORD: "${NOMINATIM_PASSWORD:-openkarta}" # override via env or .env
     shm_size: "1gb"
     volumes:
       # Mount at the postgres root (version-agnostic) so the import persists
@@ -119,12 +142,19 @@ services:
       - ./data:/data
     expose:
       - "8080"
+    # See tile-server note: the script must be one argv element, not a string.
+    entrypoint:
+      - /bin/bash
+      - -c
+      - 'until [ -f /data/.pbf_ok ] && [ -s /data/ethiopia-latest.osm.pbf ]; do echo "[nominatim] waiting for the validated OSM extract..."; sleep 15; done; exec /app/start.sh'
+    command: []
 
   # ---------------------------------------------------------------------------
   # 5) Photon — type-ahead (prefix) autocomplete geocoder. Builds its embedded
   #    OpenSearch index from the Nominatim DB on first start (Ethiopia only),
   #    then serves /api on :2322 with CORS. Nominatim can't do char-prefix
-  #    matching; Photon can ("Ayer Ten" -> "Ayer Tena").
+  #    matching; Photon can ("Ayer Ten" -> "Ayer Tena"). The pipeline triggers
+  #    a reindex when the index is older than PHOTON_REINDEX_DAYS.
   # ---------------------------------------------------------------------------
   photon:
     image: eclipse-temurin:21-jre
@@ -134,7 +164,7 @@ services:
     depends_on: [geocoder]
     environment:
       NOMINATIM_HOST: ok_geocoder
-      NOMINATIM_PASSWORD: openkarta
+      NOMINATIM_PASSWORD: "${NOMINATIM_PASSWORD:-openkarta}" # must match the geocoder
       JAVA_TOOL_OPTIONS: "-Xmx4g"
     volumes:
       - ./photon:/opt/photon:ro # photon jar + run.sh
@@ -149,7 +179,7 @@ services:
   #     Internal only — reached via the :8000 proxy at /vroom/.
   # ---------------------------------------------------------------------------
   vroom:
-    image: ghcr.io/vroom-project/vroom-docker:latest
+    image: ghcr.io/vroom-project/vroom-docker:v1.14.0
     container_name: ok_vroom
     restart: unless-stopped
     networks: [karta-network]
@@ -168,7 +198,7 @@ services:
   #    only ever talks to :8000.
   # ---------------------------------------------------------------------------
   web-showcase:
-    image: nginx:alpine
+    image: nginx:1.27-alpine
     container_name: ok_web_showcase
     restart: unless-stopped
     networks: [karta-network]

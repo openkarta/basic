@@ -8,7 +8,7 @@ cliArgs:
   threads: 4
   explore: 5
   limit: '1mb'
-  logdir: '..'
+  logdir: '/tmp'          # writable scratch — the /conf mount is read-only
   logsize: '100M'
   maxlocations: 1000      # max jobs/shipments locations per request
   maxvehicles: 200

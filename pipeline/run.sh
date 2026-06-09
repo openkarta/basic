@@ -2,12 +2,20 @@
 # ==========================================================================
 #  Open Karta — data pipeline & orchestrator
 # ==========================================================================
-#  Runs inside an alpine container with the host docker socket mounted. Every
+#  Runs inside the pinned pipeline image (alpine + curl + docker-cli baked in,
+#  see pipeline/Dockerfile) with the host docker socket mounted. Every
 #  $INTERVAL seconds it:
 #    1. Ingests the Ethiopia OSM extract (time-conditional, bandwidth-saving).
-#    2. Builds OpenMapTiles vector tiles with Planetiler.
-#    3. Builds the OSRM routing graph (car profile, MLD: extract/partition/customize).
-#    4. Hot-reloads the tile + routing servers (only what actually rebuilt).
+#    2. Builds OpenMapTiles vector tiles with Planetiler — into a temp file.
+#    3. Builds the OSRM routing graph in a scratch dir (car profile, MLD).
+#    4. Atomically swaps in whatever rebuilt, hot-reloads those engines, and
+#       triggers a Photon reindex when its snapshot of Nominatim is stale.
+#
+#  Atomicity: the live engines keep the OLD inodes open across each rename, so
+#  they serve consistent data right up to their restart, and a failed build
+#  never disturbs what is currently being served. .osrm_ready is dropped only
+#  for the millisecond burst of multi-file renames, so an engine that happens
+#  to restart mid-swap waits instead of loading a half-swapped graph.
 #
 #  Every dynamically-launched build container uses --rm to avoid host pollution.
 #  Sentinel files (.tiles_ready / .osrm_ready) let the engine containers wait
@@ -18,15 +26,18 @@ set -u
 PBF="/data/ethiopia-latest.osm.pbf"
 MBTILES="/data/ethiopia-latest.mbtiles"
 OSRM="/data/ethiopia-latest.osrm"
+OSRM_BUILD="/data/osrm-build"                 # graph scratch dir (same volume)
 INTERVAL="${INTERVAL:-86400}"
 XMX="${PLANETILER_XMX:-4g}"
 PBF_URL="${PBF_URL:-https://download.geofabrik.de/africa/ethiopia-latest.osm.pbf}"
+# Pinned builder images (compose sets these). OSRM_IMAGE must match the
+# routing-engine service image — the graph format is version-specific.
+PLANETILER_IMAGE="${PLANETILER_IMAGE:-ghcr.io/onthegomap/planetiler:0.8.2}"
+OSRM_IMAGE="${OSRM_IMAGE:-osrm/osrm-backend:v5.27.1}"
+PHOTON_REINDEX_DAYS="${PHOTON_REINDEX_DAYS:-7}"
 
 # Absolute HOST path to ./data — required for sibling-container bind mounts.
 : "${HOST_DATA_DIR:?HOST_DATA_DIR must be set to the absolute host path of ./data}"
-
-echo "[pipeline] installing dependencies (curl, docker-cli)..."
-apk add --no-cache curl docker-cli >/dev/null 2>&1 || apk add --no-cache curl docker-cli
 
 mkdir -p /data
 
@@ -82,18 +93,24 @@ while true; do
   # (e.g. a truncated GitHub release-asset CDN response). Successfully fetched
   # files in /data/sources are reused, so we just retry the whole build a few
   # times — a fresh attempt almost always gets the missing file.
+  # The build lands in $MBT_NEW and is renamed over the live file only on
+  # success: Martin keeps the old inode open until its restart, so a failed or
+  # partial build can never be served.
   echo "[pipeline] [2/4] building vector tiles with Planetiler (Xmx=${XMX})..."
+  MBT_NEW="${MBTILES}.new"
+  rm -f "$MBT_NEW" "${MBT_NEW}-journal"
   PT_ATTEMPT=1; PT_MAX=4
   while [ "$PT_ATTEMPT" -le "$PT_MAX" ]; do
     echo "[pipeline]       Planetiler attempt ${PT_ATTEMPT}/${PT_MAX}..."
     if docker run --rm \
           -e JAVA_TOOL_OPTIONS="-Xmx${XMX}" \
           -v "${HOST_DATA_DIR}":/data \
-          ghcr.io/onthegomap/planetiler:latest \
+          "$PLANETILER_IMAGE" \
           --osm-path=/data/ethiopia-latest.osm.pbf \
-          --output=/data/ethiopia-latest.mbtiles \
+          --output=/data/ethiopia-latest.mbtiles.new \
           --download --download-dir=/data/sources \
           --force; then
+      mv -f "$MBT_NEW" "$MBTILES"
       touch /data/.tiles_ready
       echo "[pipeline]       Planetiler OK -> ${MBTILES}"
       TILES_OK=1
@@ -106,11 +123,26 @@ while true; do
   [ "$TILES_OK" = "1" ] || echo "[pipeline]       ERROR: Planetiler failed after ${PT_MAX} attempts (tile server keeps serving old data)"
 
   # --- Task 3: Routing graph (OSRM car profile, MLD) ------------------------
+  # Built in a scratch dir, then renamed into place: building in place would
+  # truncate the very files the live osrm-routed has mmap'd. The PBF is
+  # hardlinked into the scratch dir (same filesystem -> free; cp fallback) so
+  # osrm-extract's outputs land there too.
   echo "[pipeline] [3/4] building OSRM routing graph (car profile, MLD)..."
-  if docker run --rm -v "${HOST_DATA_DIR}":/data osrm/osrm-backend osrm-extract   -p /opt/car.lua /data/ethiopia-latest.osm.pbf \
-  && docker run --rm -v "${HOST_DATA_DIR}":/data osrm/osrm-backend osrm-partition  /data/ethiopia-latest.osrm \
-  && docker run --rm -v "${HOST_DATA_DIR}":/data osrm/osrm-backend osrm-customize  /data/ethiopia-latest.osrm; then
+  rm -rf "$OSRM_BUILD"
+  mkdir -p "$OSRM_BUILD"
+  ln -f "$PBF" "$OSRM_BUILD/ethiopia-latest.osm.pbf" 2>/dev/null \
+    || cp -f "$PBF" "$OSRM_BUILD/ethiopia-latest.osm.pbf"
+  if docker run --rm -v "${HOST_DATA_DIR}":/data "$OSRM_IMAGE" osrm-extract   -p /opt/car.lua /data/osrm-build/ethiopia-latest.osm.pbf \
+  && docker run --rm -v "${HOST_DATA_DIR}":/data "$OSRM_IMAGE" osrm-partition  /data/osrm-build/ethiopia-latest.osrm \
+  && docker run --rm -v "${HOST_DATA_DIR}":/data "$OSRM_IMAGE" osrm-customize  /data/osrm-build/ethiopia-latest.osrm; then
+    # The graph is ~20 files, so the swap can't be a single rename. Hold the
+    # sentinel down for the (millisecond) rename burst: a server restarting
+    # mid-swap waits instead of mmap'ing a half-swapped graph. The RUNNING
+    # server is untouched either way — it holds the old inodes.
+    rm -f /data/.osrm_ready
+    mv -f "$OSRM_BUILD"/ethiopia-latest.osrm* /data/
     touch /data/.osrm_ready
+    rm -rf "$OSRM_BUILD"
     echo "[pipeline]       OSRM OK -> ${OSRM}.*"
     OSRM_OK=1
   else
@@ -124,6 +156,21 @@ while true; do
   fi
   if [ "$OSRM_OK" = "1" ]; then
     docker restart ok_routing_engine >/dev/null 2>&1 && echo "[pipeline]       restarted ok_routing_engine" || echo "[pipeline]       WARN: ok_routing_engine not running"
+  fi
+
+  # Photon's index is a point-in-time snapshot of the Nominatim DB (which keeps
+  # itself fresh via replication — see docker-compose.yml). Rebuild the snapshot
+  # when older than PHOTON_REINDEX_DAYS (0 disables): dropping /photon/.ready
+  # makes photon/run.sh reimport on the restart that follows (expect a brief
+  # search outage while it rebuilds).
+  if [ "$PHOTON_REINDEX_DAYS" -gt 0 ] 2>/dev/null \
+     && docker exec ok_photon find /photon/.ready -mtime +"$((PHOTON_REINDEX_DAYS - 1))" 2>/dev/null | grep -q .; then
+    echo "[pipeline]       Photon index older than ${PHOTON_REINDEX_DAYS}d; rebuilding it from Nominatim"
+    if docker exec ok_photon rm -f /photon/.ready && docker restart ok_photon >/dev/null 2>&1; then
+      echo "[pipeline]       restarted ok_photon (reimports on boot)"
+    else
+      echo "[pipeline]       WARN: could not trigger the Photon reindex"
+    fi
   fi
 
   echo "[pipeline] cycle done; sleeping ${INTERVAL}s"
