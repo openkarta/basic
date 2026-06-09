@@ -180,10 +180,10 @@ Data auto-refreshes every `INTERVAL` seconds (default `86400` = 24h).
   collapsible **turn-by-turn** list (icons + connector rail). The full stop list
   is shareable in the URL (`?route=lng,lat;lng,lat;…`).
 - **Shareable URLs** — the whole app state lives in the URL: camera
-  (zoom/lat/lng) in the `#hash` (MapLibre's built-in hash), and `base`, `lang`,
-  `place` (+`plabel`) and `route` (origin;destination) as query params. Copy the
-  link to reproduce the exact view, basemap, label language, dropped pin and
-  computed route. Example: `?base=satellite&lang=am&route=38.7,9.0;37.4,11.6#8/10.3/37.8`
+  (zoom/lat/lng) in the `#hash` (MapLibre's built-in hash), and `base`, `lang`
+  and `route` (origin;waypoints;destination) as query params. Copy the
+  link to reproduce the exact view, basemap, label language and computed route.
+  Example: `?base=satellite&lang=am&route=38.7,9.0;37.4,11.6#8/10.3/37.8`
 - **Collapsible panel** — the overlay collapses to a compact brand bar to free the map.
 - **Fully self-hosted assets** — MapLibre GL JS/CSS, UI fonts, map glyphs
   (Noto Sans, incl. Amharic/Ethiopic ranges), and sprites are all served from
@@ -224,7 +224,7 @@ These were required to make the stack actually run out of the box:
 ├── docker-compose.yml          # orchestration (7 services, karta-network)
 ├── pipeline/run.sh             # ingest → Planetiler → OSRM → hot reload
 ├── photon/run.sh               # Photon: import index from Nominatim DB, then serve :2322
-├── vroom/config.yml            # VROOM optimiser → OSRM driver (ok_routing_engine:5000)
+├── vroom/config.yml            # VROOM optimizer → OSRM driver (ok_routing_engine:5000)
 ├── proxy/
 │   └── web.conf                # gateway: static app + /docs + reverse proxy to every backend
 ├── docs/                       # docsify API reference (every endpoint) — served at :8000/docs

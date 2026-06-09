@@ -23,7 +23,7 @@ them only through their proxied path prefixes.
 
 ## Conventions
 
-- **Method:** every endpoint here is `GET`.
+- **Method:** every endpoint is `GET`, except VROOM optimization (`POST /vroom/`).
 - **CORS:** the gateway normalises CORS on every proxied path (a single
   `Access-Control-Allow-Origin: *`), so endpoints are usable cross-origin too.
 - **Coordinates:** OSRM and Photon use **`lon,lat`** order (GeoJSON); Nominatim

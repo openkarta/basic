@@ -160,4 +160,4 @@ curl -s "http://localhost:8000/osrm/tile/v1/driving/tile(2489,1980,12).mvt" -o g
 | `trip` (stop ordering / TSP) | Routes API (optimize waypoint order) | Route Directions (`computeBestOrder=true`) | **Optimization API** |
 
 *Rough equivalents — parameters, limits and travel-mode coverage differ. For
-full fleet optimisation see [VROOM](optimization.md).*
+full fleet optimization see [VROOM](optimization.md).*

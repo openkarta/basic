@@ -31,7 +31,7 @@ are served by the same gateway at `/docs`).
 
 ## Notes
 
-- All methods are `GET`.
+- All endpoints are `GET`, except VROOM (`POST /vroom/`).
 - A backend that is still building (first boot) returns `502`/`503` through the
   proxy until its data is ready — the app surfaces this as a friendly message.
 - The proxy uses fixed container names (`ok_tile_server`, `ok_routing_engine`,

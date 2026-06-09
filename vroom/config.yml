@@ -1,5 +1,5 @@
 # vroom-express config — Open Karta.
-# VROOM (vehicle-routing optimisation) using the OSRM driver, pointed at our
+# VROOM (vehicle-routing optimization) using the OSRM driver, pointed at our
 # existing routing engine. osrm-routed ignores the URL profile segment, so the
 # `car` key works against the loaded Ethiopia `driving` graph.
 cliArgs:

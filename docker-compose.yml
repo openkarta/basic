@@ -77,7 +77,7 @@ services:
     command: []
 
   # ---------------------------------------------------------------------------
-  # 4) Routing engine (OSRM) — car profile, MLD algorithm.
+  # 3) Routing engine (OSRM) — car profile, MLD algorithm.
   #    Waits for the pipeline's .osrm_ready sentinel before serving.
   # ---------------------------------------------------------------------------
   routing-engine:
@@ -98,7 +98,7 @@ services:
     command: []
 
   # ---------------------------------------------------------------------------
-  # 5) Geocoder (Nominatim). Self-imports from Geofabrik via PBF_URL so it can
+  # 4) Geocoder (Nominatim). Self-imports from Geofabrik via PBF_URL so it can
   #    never crash-loop waiting on the shared file (guardrail: graceful empty
   #    state). Internal only — reached via the :8000 proxy at /nominatim/
   #    (which also normalises CORS, so no separate shim is needed).
@@ -121,10 +121,7 @@ services:
       - "8080"
 
   # ---------------------------------------------------------------------------
-  # 6) Web showcase (static MapLibre GL app served by nginx).
-  # ---------------------------------------------------------------------------
-  # ---------------------------------------------------------------------------
-  # 7) Photon — type-ahead (prefix) autocomplete geocoder. Builds its embedded
+  # 5) Photon — type-ahead (prefix) autocomplete geocoder. Builds its embedded
   #    OpenSearch index from the Nominatim DB on first start (Ethiopia only),
   #    then serves /api on :2322 with CORS. Nominatim can't do char-prefix
   #    matching; Photon can ("Ayer Ten" -> "Ayer Tena").
@@ -147,7 +144,7 @@ services:
       - "2322"            # internal only — reached via the :8000 proxy at /photon/
 
   # ---------------------------------------------------------------------------
-  # 7b) VROOM — vehicle-routing optimisation (VRP: vehicles + jobs/shipments).
+  # 6) VROOM — vehicle-routing optimization (VRP: vehicles + jobs/shipments).
   #     Uses the OSRM driver pointed at our routing-engine for the cost matrix.
   #     Internal only — reached via the :8000 proxy at /vroom/.
   # ---------------------------------------------------------------------------
@@ -165,7 +162,7 @@ services:
       - "3000"
 
   # ---------------------------------------------------------------------------
-  # 8) Web showcase + single public gateway. Serves the MapLibre app, the
+  # 7) Web showcase + single public gateway. Serves the MapLibre app, the
   #    docsify API reference at /docs, AND reverse-proxies every backend
   #    same-origin (/tiles/ /osrm/ /photon/ /nominatim/) — so the browser
   #    only ever talks to :8000.
