@@ -38,16 +38,40 @@ while true; do
   TILES_OK=0
   OSRM_OK=0
 
-  # --- Task 1: Ingest (conditional download) --------------------------------
-  echo "[pipeline] [1/4] downloading OSM extract (conditional)..."
-  if curl -fL -z "$PBF" -o "$PBF" "$PBF_URL"; then
-    echo "[pipeline]       download OK (or upstream unchanged)"
+  # --- Task 1: Ingest (follow redirects, validate, atomic replace) ----------
+  # Geofabrik's *-latest.osm.pbf 302-redirects to a dated file, so -L is
+  # required. We download to a TEMP file and only replace the live PBF once it
+  # validates as a real OSM PBF — so a redirect/error page or a half-finished
+  # transfer can never overwrite the known-good data the engines rebuild from.
+  # The conditional (-z) is only trusted when a previously *validated* full PBF
+  # exists (the .pbf_ok marker); a missing/partial file always forces a fresh,
+  # complete download.
+  echo "[pipeline] [1/4] downloading OSM extract (follow redirects, validated)..."
+  TMP="${PBF}.part"
+  rm -f "$TMP"
+  ZOPT=""
+  [ -f /data/.pbf_ok ] && [ -s "$PBF" ] && ZOPT="-z $PBF"
+  if curl -fL --no-progress-meter --retry 3 --retry-delay 5 --retry-connrefused --connect-timeout 30 \
+          $ZOPT -o "$TMP" "$PBF_URL"; then
+    if [ -s "$TMP" ] && head -c 64 "$TMP" | grep -aq OSMHeader; then
+      mv -f "$TMP" "$PBF" && touch /data/.pbf_ok
+      echo "[pipeline]       download OK -> $(wc -c < "$PBF") bytes"
+    elif [ ! -s "$TMP" ]; then
+      echo "[pipeline]       upstream unchanged (304); keeping existing PBF"
+      rm -f "$TMP"
+    else
+      echo "[pipeline]       ERROR: download is not a valid OSM PBF ($(wc -c < "$TMP") bytes); discarding"
+      rm -f "$TMP"
+    fi
   else
-    echo "[pipeline]       WARN: download failed; will reuse existing file if present"
+    echo "[pipeline]       WARN: download failed; reusing existing PBF if present"
+    rm -f "$TMP"
   fi
 
-  if [ ! -s "$PBF" ]; then
-    echo "[pipeline]       no PBF available yet; retrying in ${INTERVAL}s"
+  # Only ever build from a PBF that passed validation (the .pbf_ok marker) — so
+  # a failed download leaving a stale partial behind can never feed the build.
+  if [ ! -s "$PBF" ] || [ ! -f /data/.pbf_ok ]; then
+    echo "[pipeline]       no validated PBF yet; keeping existing engine data, retrying in ${INTERVAL}s"
     sleep "$INTERVAL"
     continue
   fi
