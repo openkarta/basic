@@ -1,0 +1,11 @@
+<svg viewBox="0 0 1129.412 1129.412" width="3840" height="3840" aria-label="BedRock — an Open Karta layer" xmlns="http://www.w3.org/2000/svg">
+    <g style="fill:#fff">
+        <rect style="fill:#fff;stroke-width:5.88274" width="1266.348" height="1240.206" x="-68.468" y="-55.397" rx="92.376"/>
+    </g>
+    <g transform="translate(247.375 247.375) scale(6.34662)">
+        <circle cx="50" cy="50" r="44" fill="#3e5c80" fill-opacity=".14"/>
+        <circle cx="50" cy="50" r="29" fill="#3e5c80" fill-opacity=".18"/>
+        <circle cx="50" cy="50" r="17.5" fill="#fff"/>
+        <circle cx="50" cy="50" r="12" fill="#3e5c80"/>
+    </g>
+</svg>

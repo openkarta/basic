@@ -1,0 +1,1010 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+<title>Open Karta · Ethiopia Geospatial Stack</title>
+<link rel="icon" type="image/svg+xml" href="logos/openkarta-dark-optimized.svg" />
+
+<!-- Self-hosted: no external CDN requests -->
+<link href="vendor/maplibre-gl.css" rel="stylesheet" />
+<script src="vendor/maplibre-gl.js"></script>
+
+<link href="fonts-ui/ui.css" rel="stylesheet" />
+
+<style>
+  :root {
+    --ink:        #0a111b;   /* body backdrop                        */
+    --panel:      #0e1620;   /* brand navy (from logo)               */
+    --panel-2:    #16212f;   /* raised surface                       */
+    --line:       #25384c;   /* hairline borders (steel-tinted)      */
+    --parchment:  #e9eff6;   /* primary text (cool off-white)        */
+    --muted:      #94a7bd;   /* secondary text                       */
+    --faint:      #5b7088;   /* tertiary text                        */
+    --saffron:    #6f9bcb;   /* primary accent (brand steel, bright) */
+    --saffron-dk: #3e5c80;   /* brand steel (base, from logo)        */
+    --amber:      #e0a23a;   /* warn / starting (semantic)           */
+    --emerald:    #3fae74;   /* online / ok (semantic)               */
+    --terracotta: #e2574a;   /* offline / destination / alert        */
+    --radius:     14px;
+    --shadow:     0 24px 60px -18px rgba(0,0,0,.7), 0 2px 0 rgba(255,255,255,.02) inset;
+  }
+
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    font-family: "Archivo", "Noto Sans Ethiopic", system-ui, sans-serif;
+    background: var(--ink);
+    color: var(--parchment);
+    overflow: hidden;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  #map { position: absolute; inset: 0; }
+
+  /* faint vignette so the bright basemap recedes under the panel */
+  #map::after {
+    content: ""; position: absolute; inset: 0; pointer-events: none;
+    background: radial-gradient(120% 90% at 78% 50%, transparent 55%, rgba(8,14,22,.28) 100%);
+  }
+
+  /* ----------------------------------------------------------------- panel */
+  .panel {
+    position: absolute; top: 22px; left: 22px; z-index: 5;
+    width: 372px; max-width: calc(100vw - 44px);
+    max-height: calc(100vh - 44px);
+    display: flex; flex-direction: column;
+    background:
+      linear-gradient(180deg, rgba(255,255,255,.03), transparent 120px),
+      var(--panel);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    overflow: hidden;
+    backdrop-filter: blur(2px);
+  }
+  /* film grain */
+  .panel::before {
+    content:""; position:absolute; inset:0; pointer-events:none; opacity:.045; mix-blend-mode:overlay;
+    background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='120' height='120'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
+  }
+  .panel > * { position: relative; }
+
+  .scroll { overflow-y: auto; padding: 0 20px 18px; }
+  .scroll::-webkit-scrollbar { width: 8px; }
+  .scroll::-webkit-scrollbar-thumb { background: var(--line); border-radius: 8px; }
+
+  /* header */
+  .head { padding: 20px 20px 16px; border-bottom: 1px solid var(--line);
+          background: linear-gradient(90deg, rgba(111,155,203,.10), transparent 70%); }
+  .brandrow { display:flex; align-items:center; gap:11px; }
+  .mark { width:36px; height:36px; flex:0 0 auto; display:block; border-radius:9px;
+          box-shadow:0 2px 10px rgba(0,0,0,.35); }
+  .wordmark { font-family:"Fraunces", "Noto Sans Ethiopic", serif; font-weight:900; font-size:25px; letter-spacing:-.01em; line-height:1;
+              background:linear-gradient(180deg,#fff,#9fc0e6); -webkit-background-clip:text; background-clip:text; color:transparent; }
+  .tagline { margin-top:7px; font-family:"JetBrains Mono", "Noto Sans Ethiopic", monospace; font-size:10.5px; letter-spacing:.22em;
+             text-transform:uppercase; color:var(--faint); }
+
+  /* collapse toggle */
+  .toggle { margin-left:auto; flex:0 0 auto; width:30px; height:30px; display:grid; place-items:center;
+            background:var(--panel-2); border:1px solid var(--line); border-radius:8px; color:var(--muted);
+            cursor:pointer; transition:color .18s, border-color .18s, background .18s; }
+  .toggle:hover { color:var(--parchment); border-color:var(--saffron-dk); background:rgba(111,155,203,.10); }
+  .toggle svg { width:16px; height:16px; transition:transform .25s ease; }
+  .panel.collapsed .toggle svg { transform:rotate(180deg); }
+  .panel.collapsed .scroll, .panel.collapsed .foot, .panel.collapsed .tagline { display:none; }
+  .panel.collapsed .head { border-bottom:none; }
+
+  /* sections */
+  .sec { padding-top: 18px; }
+  .sec-label { display:flex; align-items:center; gap:8px; font-family:"JetBrains Mono", "Noto Sans Ethiopic", monospace;
+               font-size:10.5px; letter-spacing:.18em; text-transform:uppercase; color:var(--saffron);
+               margin: 0 0 10px; }
+  .sec-label .n { color:var(--faint); }
+  .sec-label::after { content:""; flex:1; height:1px; background:linear-gradient(90deg,var(--line),transparent); }
+
+  /* trip planner — dynamic stop rows (origin / waypoints / destination) */
+  .trip { position:relative; background:var(--panel-2); border:1px solid var(--line); border-radius:12px; padding:5px 6px; }
+  .trip-row { position:relative; display:grid; grid-template-columns:16px 1fr 24px; gap:9px; align-items:center; }
+  .trip-row .dot { position:relative; width:11px; height:11px; border-radius:50%; justify-self:center; z-index:1; }
+  .trip-row .dot.a  { background:var(--saffron);    box-shadow:0 0 0 3px rgba(111,155,203,.18); }
+  .trip-row .dot.b  { background:var(--terracotta); box-shadow:0 0 0 3px rgba(223,91,59,.18); }
+  .trip-row .dot.wp { background:#e0a23a;           box-shadow:0 0 0 3px rgba(224,162,58,.18); }
+  /* dotted connector from each row's dot up to the previous one (dots cover the ends) */
+  .trip-row:not(:first-child) .dot::before { content:""; position:absolute; left:50%; transform:translateX(-50%);
+                                             bottom:50%; height:44px; border-left:2px dotted var(--line); z-index:-1; }
+  .tf { position:relative; min-width:0; border-radius:8px; padding:6px 9px; transition:background .15s, box-shadow .15s; }
+  .tf:hover { background:rgba(111,155,203,.06); }
+  .tf.armed { background:rgba(111,155,203,.12); box-shadow:inset 0 0 0 1.5px var(--saffron); }
+  .tf-lab { display:block; font-family:"JetBrains Mono","Noto Sans Ethiopic",monospace; font-size:9px; letter-spacing:.14em; text-transform:uppercase; color:var(--faint); }
+  .tf-in { width:100%; background:transparent; border:0; outline:none; color:var(--parchment); font-size:13px;
+           font-family:"Archivo","Noto Sans Ethiopic",sans-serif; padding:2px 0 0; text-overflow:ellipsis; }
+  .tf-in::placeholder { color:var(--faint); }
+  .tf-rm { width:24px; height:24px; justify-self:center; border:0; border-radius:7px; background:transparent; color:var(--faint);
+           cursor:pointer; display:grid; place-items:center; transition:all .15s; }
+  .tf-rm:hover { color:var(--terracotta); background:rgba(223,91,59,.10); }
+  .tf-rm svg { width:14px; height:14px; }
+  /* per-field autocomplete dropdown */
+  .tf-ac { position:absolute; left:0; right:0; top:calc(100% + 5px); z-index:40; list-style:none; margin:0; padding:0;
+           background:var(--panel); border:1px solid var(--line); border-radius:10px; overflow:hidden auto;
+           box-shadow:0 16px 34px -14px rgba(0,0,0,.7); max-height:236px; }
+  .tf-ac[hidden] { display:none; }
+  .tf-ac li { padding:8px 11px; cursor:pointer; }
+  .tf-ac li.active, .tf-ac li:hover { background:rgba(111,155,203,.14); }
+  .tf-ac .ac-name { font-size:13px; color:var(--parchment); font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .tf-ac .ac-sub { font-size:11px; color:var(--faint); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; margin-top:1px; }
+  .tf-ac .ac-empty { padding:9px 11px; font-size:12px; color:var(--faint); }
+
+  .trip-actions { display:flex; gap:7px; margin-top:9px; }
+  .chip-btn { flex:1; display:flex; align-items:center; justify-content:center; gap:6px; cursor:pointer; min-width:0;
+              font-family:"JetBrains Mono","Noto Sans Ethiopic",monospace; font-size:9.5px; letter-spacing:.06em; text-transform:uppercase;
+              color:var(--muted); background:var(--panel-2); border:1px solid var(--line); border-radius:9px; padding:9px 8px; transition:all .15s; white-space:nowrap; }
+  .chip-btn:hover:not(:disabled) { color:var(--parchment); border-color:var(--saffron-dk); background:rgba(111,155,203,.06); }
+  .chip-btn:disabled { opacity:.4; cursor:not-allowed; }
+  .chip-btn svg { width:13px; height:13px; flex:0 0 auto; }
+  .ticon { width:38px; flex:0 0 auto; border-radius:9px; border:1px solid var(--line); background:var(--panel-2); color:var(--muted);
+           cursor:pointer; display:grid; place-items:center; transition:all .15s; }
+  .ticon:hover:not(:disabled) { color:var(--parchment); border-color:var(--saffron-dk); background:rgba(111,155,203,.08); }
+  .ticon:disabled { opacity:.35; cursor:not-allowed; }
+  .ticon svg { width:16px; height:16px; }
+
+  .btn-primary { margin-top:9px; width:100%; cursor:pointer; font-family:"JetBrains Mono","Noto Sans Ethiopic",monospace;
+                 font-size:11px; letter-spacing:.12em; text-transform:uppercase; font-weight:600; color:#081019;
+                 background:var(--saffron); border:1px solid var(--saffron); border-radius:10px; padding:12px;
+                 box-shadow:0 8px 20px -10px rgba(111,155,203,.55); transition:filter .15s, opacity .15s; }
+  .btn-primary:hover:not(:disabled) { filter:brightness(1.08); }
+  .btn-primary:disabled { opacity:.38; cursor:not-allowed; box-shadow:none; }
+
+  .trip-hint { font-size:11.5px; line-height:1.5; color:var(--faint); margin:11px 2px 0; }
+
+  .metrics { display:none; grid-template-columns:1fr 1fr; gap:10px; margin-top:12px; }
+  .metrics.show { display:grid; animation:rise .4s ease both; }
+  .metric { background:linear-gradient(180deg,var(--panel-2),#101926); border:1px solid var(--line);
+            border-radius:11px; padding:13px 14px; }
+  .metric .k { font-family:"JetBrains Mono","Noto Sans Ethiopic",monospace; font-size:9.5px; letter-spacing:.16em; text-transform:uppercase; color:var(--faint); }
+  .metric .v { font-family:"Fraunces","Noto Sans Ethiopic",serif; font-weight:600; font-size:26px; line-height:1.05; margin-top:4px; color:var(--parchment); }
+  .metric .v small { font-size:13px; color:var(--muted); font-family:"Archivo","Noto Sans Ethiopic",sans-serif; font-weight:500; }
+
+  /* turn-by-turn directions */
+  .steps-wrap { display:none; margin-top:12px; border:1px solid var(--line); border-radius:11px;
+                overflow:hidden; background:var(--panel-2); }
+  .steps-wrap.show { display:block; animation:rise .35s ease both; }
+  .steps-head { width:100%; display:flex; align-items:center; gap:9px; cursor:pointer; border:0;
+                background:linear-gradient(90deg, rgba(111,155,203,.10), transparent); color:var(--parchment);
+                padding:11px 12px; font-family:"JetBrains Mono","Noto Sans Ethiopic",monospace; font-size:11px;
+                letter-spacing:.14em; text-transform:uppercase; }
+  .steps-head .dir-ico { width:15px; height:15px; color:var(--saffron); flex:0 0 auto; }
+  .steps-head .steps-count { margin-left:auto; color:var(--faint); font-size:10px; letter-spacing:.06em; }
+  .steps-head .chev { width:15px; height:15px; color:var(--muted); transition:transform .25s ease; flex:0 0 auto; }
+  .steps-wrap.collapsed .chev { transform:rotate(-90deg); }
+  .steps-wrap.collapsed .steps { display:none; }
+  .steps { list-style:none; margin:0; padding:0; max-height:288px; overflow-y:auto; border-top:1px solid var(--line); }
+  .steps::-webkit-scrollbar { width:8px; }
+  .steps::-webkit-scrollbar-thumb { background:var(--line); border-radius:8px; }
+  .steps li { display:flex; align-items:flex-start; gap:11px; padding:10px 12px; position:relative; }
+  .steps li:not(:last-child)::after { content:""; position:absolute; left:27px; top:34px; bottom:-1px; width:2px;
+                                      background:var(--line); }   /* connector rail */
+  .step-ico { width:32px; height:32px; flex:0 0 auto; border-radius:9px; display:grid; place-items:center;
+              background:rgba(111,155,203,.13); color:var(--saffron); z-index:1; }
+  .step-ico svg { width:18px; height:18px; }
+  .step-ico.depart { color:var(--emerald); background:rgba(63,174,116,.15); }
+  .step-ico.arrive { color:var(--terracotta); background:rgba(226,87,74,.16); }
+  .step-body { min-width:0; flex:1; padding-top:1px; }
+  .step-instr { font-size:12.5px; color:var(--muted); line-height:1.38; }
+  .step-instr b { color:var(--parchment); font-weight:600; }
+  .step-dist { margin-top:3px; font-family:"JetBrains Mono","Noto Sans Ethiopic",monospace; font-size:10px; color:var(--faint);
+               letter-spacing:.04em; }
+
+  /* top-right segmented toggles — match the (dark-restyled) built-in ctrl-group */
+  .ok-segs { display:flex; gap:10px; }
+  .ok-seg { display:flex; background:var(--panel); border:1px solid var(--line); border-radius:4px; overflow:hidden;
+            box-shadow:0 0 0 2px rgba(0,0,0,.1); }
+  .ok-seg button { border:0; cursor:pointer; background:transparent; color:var(--muted); height:29px; padding:0 11px;
+                   font-family:"Archivo","Noto Sans Ethiopic",sans-serif; font-size:12px; font-weight:500;
+                   white-space:nowrap; transition:background .15s, color .15s; }
+  .ok-seg button + button { border-left:1px solid var(--line); }
+  .ok-seg button:hover { background:rgba(111,155,203,.12); color:var(--parchment); }
+  .ok-seg button.active { background:var(--saffron); color:#081019; }   /* selected segment (matches panel switchers) */
+
+  /* footer telemetry */
+  .foot { border-top:1px solid var(--line); padding:13px 20px 14px;
+          background:linear-gradient(180deg, transparent, rgba(0,0,0,.25)); }
+  .svc { display:flex; align-items:center; gap:9px; padding:3px 0; font-size:12px; }
+  .dot { width:8px; height:8px; border-radius:50%; flex:0 0 auto; background:var(--faint);
+         box-shadow:0 0 0 0 rgba(0,0,0,0); transition:.3s; }
+  .dot.on    { background:var(--emerald);    box-shadow:0 0 9px rgba(63,174,116,.7); }
+  .dot.warn  { background:var(--amber);       box-shadow:0 0 9px rgba(224,162,58,.6); animation:pulse 1.4s infinite; }
+  .dot.off   { background:#5a4631; }
+  .svc .name { color:var(--muted); }
+  .svc .state { margin-left:auto; font-family:"JetBrains Mono","Noto Sans Ethiopic",monospace; font-size:10px;
+                letter-spacing:.1em; text-transform:uppercase; color:var(--faint); }
+  .coords { margin-top:10px; padding-top:10px; border-top:1px dashed var(--line);
+            font-family:"JetBrains Mono","Noto Sans Ethiopic",monospace; font-size:10.5px; color:var(--faint);
+            display:flex; justify-content:space-between; }
+  .coords b { color:var(--muted); font-weight:500; }
+  .docs-link { display:flex; align-items:center; gap:7px; margin-top:9px; padding-top:9px; border-top:1px dashed var(--line);
+               text-decoration:none; color:var(--muted); font-family:"JetBrains Mono","Noto Sans Ethiopic",monospace;
+               font-size:10.5px; letter-spacing:.04em; transition:color .15s; }
+  .docs-link:hover { color:var(--saffron); }
+  .docs-link svg { width:13px; height:13px; flex:0 0 auto; }
+  .docs-link span { flex:1; }
+  .docs-link .ext { width:11px; height:11px; opacity:.7; }
+
+  /* toast / status line */
+  .toast {
+    position:absolute; left:50%; bottom:26px; transform:translate(-50%,16px); z-index:6;
+    background:rgba(14,22,32,.92); border:1px solid var(--line); color:var(--parchment);
+    font-family:"JetBrains Mono","Noto Sans Ethiopic",monospace; font-size:12px; letter-spacing:.02em;
+    padding:10px 16px; border-radius:999px; box-shadow:var(--shadow);
+    opacity:0; pointer-events:none; transition:.32s cubic-bezier(.2,.8,.2,1);
+    display:flex; align-items:center; gap:9px; max-width:min(80vw,520px);
+  }
+  .toast.show { opacity:1; transform:translate(-50%,0); }
+  .toast .tdot { width:7px; height:7px; border-radius:50%; background:var(--saffron); flex:0 0 auto; }
+  .toast.err .tdot { background:var(--terracotta); }
+  .toast.ok  .tdot { background:var(--emerald); }
+
+  /* map markers */
+  .mk { width:30px; height:30px; transform:translateY(-6px); filter:drop-shadow(0 5px 6px rgba(0,0,0,.4)); cursor:pointer; }
+  .mk svg { width:100%; height:100%; display:block; }
+  .mk .glyph { font-family:"JetBrains Mono","Noto Sans Ethiopic",monospace; font-weight:700; font-size:12px; }
+
+  /* maplibre chrome restyle */
+  .maplibregl-ctrl-group { background:var(--panel) !important; border:1px solid var(--line) !important; }
+  .maplibregl-ctrl-group button + button { border-top:1px solid var(--line) !important; }
+  .maplibregl-ctrl button .maplibregl-ctrl-icon { filter:invert(.85) sepia(.3) hue-rotate(330deg); }
+  .maplibregl-ctrl-attrib { background:rgba(14,22,32,.7) !important; }
+  .maplibregl-ctrl-attrib a { color:var(--muted) !important; }
+
+  /* intro animation */
+  @keyframes rise { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:none; } }
+  @keyframes pulse { 0%,100%{ box-shadow:0 0 0 0 rgba(224,162,58,.5);} 50%{ box-shadow:0 0 0 5px rgba(224,162,58,0);} }
+  .reveal { opacity:0; animation:rise .6s cubic-bezier(.2,.8,.2,1) forwards; }
+
+  @media (max-width:560px){
+    .panel{ left:12px; right:12px; top:12px; width:auto; max-height:calc(100vh - 24px); }
+  }
+</style>
+</head>
+<body>
+
+<div id="map"></div>
+
+<aside class="panel">
+  <header class="head reveal" style="animation-delay:.05s">
+    <div class="brandrow">
+      <img class="mark" src="logos/openkarta-white-optimized.svg" alt="Open Karta logo" />
+      <div>
+        <div class="wordmark">Open&nbsp;Karta</div>
+      </div>
+      <button id="toggle" class="toggle" type="button" aria-label="Collapse panel" aria-expanded="true" title="Collapse panel">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 15 6-6 6 6"/></svg>
+      </button>
+    </div>
+    <div class="tagline" data-i18n="tagline">Ethiopia · Self-hosted Geospatial Stack</div>
+  </header>
+
+  <div class="scroll">
+    <!-- trip planner: searchable Origin / waypoints / Destination -->
+    <section class="sec reveal" style="animation-delay:.1s; position:relative; z-index:6;">
+      <p class="sec-label"><span class="n">01</span> <span data-i18n="planroute">Plan a route</span></p>
+
+      <div class="trip" id="trip"></div>   <!-- stop rows rendered by renderTrip() -->
+
+      <div class="trip-actions">
+        <button class="chip-btn" id="addStop" type="button">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>
+          <span data-i18n="add_stop">Add stop</span>
+        </button>
+        <button class="chip-btn" id="useLoc" type="button">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg>
+          <span data-i18n="my_location">My location</span>
+        </button>
+        <button class="ticon" id="swap" type="button" disabled aria-label="Swap">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m17 4 4 4-4 4"/><path d="M21 8H8"/><path d="m7 20-4-4 4-4"/><path d="M3 16h13"/></svg>
+        </button>
+        <button class="ticon" id="clear" type="button" disabled aria-label="Clear">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+        </button>
+      </div>
+
+      <button class="btn-primary" id="go" type="button" disabled data-i18n="get_directions">Get directions</button>
+
+      <div class="metrics" id="metrics">
+        <div class="metric"><div class="k" data-i18n="distance">Distance</div><div class="v" id="mDist">—</div></div>
+        <div class="metric"><div class="k" data-i18n="drivetime">Drive time</div><div class="v" id="mTime">—</div></div>
+      </div>
+
+      <!-- turn-by-turn directions (collapsible) -->
+      <div class="steps-wrap" id="stepsWrap">
+        <button class="steps-head" id="stepsToggle" type="button" aria-expanded="true">
+          <svg class="dir-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6h11"/><path d="M9 12h11"/><path d="M9 18h11"/><circle cx="4" cy="6" r="1"/><circle cx="4" cy="12" r="1"/><circle cx="4" cy="18" r="1"/></svg>
+          <span data-i18n="directions">Directions</span>
+          <span class="steps-count" id="stepsCount"></span>
+          <svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+        </button>
+        <ol class="steps" id="steps"></ol>
+      </div>
+
+      <p class="trip-hint" data-i18n="trip_hint">Search, click the map, or use your location for each stop. Drag a pin to adjust.</p>
+    </section>
+  </div>
+
+  <!-- cursor readout + docs link -->
+  <footer class="foot reveal" style="animation-delay:.3s">
+    <div class="coords" style="border-top:0;padding-top:0"><span>lng <b id="cx">—</b></span><span>lat <b id="cy">—</b></span><span>z <b id="cz">—</b></span></div>
+    <a class="docs-link" href="/docs/" target="_blank" rel="noopener">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
+      <span data-i18n="api_docs">API docs &amp; endpoints</span>
+      <svg class="ext" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17 17 7M8 7h9v9"/></svg>
+    </a>
+  </footer>
+</aside>
+
+<div class="toast" id="toast"><span class="tdot"></span><span id="toastMsg"></span></div>
+
+<script>
+/* ======================================================================
+   Open Karta — frontend showcase
+   Every backend is reverse-proxied same-origin through the :8000 nginx:
+     /tiles/  Martin  ·  /osrm/  OSRM  ·  /photon/  Photon  ·  /nominatim/  Nominatim
+   ====================================================================== */
+const OSRM   = "/osrm";
+const PHOTON = "/photon";   // type-ahead autocomplete
+
+/* --------------------------- shareable URL state ------------------------ */
+/* Camera (zoom/lat/lng) lives in the map #hash (MapLibre `hash: true`).
+   Everything else is query params: base, lang, place (+plabel), route.       */
+const URLP = new URLSearchParams(location.search);
+const HAD_HASH = !!location.hash;     // did the shared link pin the camera?
+function setParam(key, val) {
+  const u = new URL(location.href);                 // includes the live #hash
+  if (val == null || val === "") u.searchParams.delete(key);
+  else u.searchParams.set(key, val);
+  history.replaceState(history.state, "", u);       // preserve the camera hash
+}
+
+/* -------------------------------- i18n ---------------------------------- */
+/* UI follows the Labels language: English for default/en, Amharic for am.    */
+const I18N = {
+  en: {
+    tagline:"Ethiopia · Self-hosted Geospatial Stack",
+    planroute:"Plan a route",  directions:"Directions", origin:"Origin", dest:"Destination",
+    distance:"Distance", drivetime:"Drive time", clear:"Clear route",
+
+
+    svc_tiles:"Vector tiles · Martin", svc_route:"Routing · OSRM", svc_search:"Search · Photon",
+    base_street:"Streets", base_satellite:"Satellite", lang_default:"Default", lang_en:"English", lang_am:"Amharic",
+    st_checking:"checking", st_online:"online", st_offline:"offline", st_starting:"starting", st_building:"building",
+    u_m:"m", u_km:"km", u_min:"min", u_h:"h", u_steps:"steps",
+      t_calc:"Calculating route…",
+    t_noroute:"No route found between those points.", t_routeready:"Route ready · {km} km", t_cleared:"Route cleared",
+    t_nomatch:"No match found in Ethiopia — try another term", t_basemap:"Basemap · {x}", t_labels:"Labels · {x}",
+    t_searcherr:"Search unavailable — Photon still building? ({e})", t_routeerr:"Routing unreachable — finished building yet? ({e})",
+      my_location:"My location", get_directions:"Get directions",
+     swap:"Reverse the route",
+    trip_hint:"Search, click the map, or use your location for each stop. Drag a pin to adjust.",
+    t_setfrom:"Start set — now choose a destination", t_setto:"Destination set", t_armfrom:"Now search or click the map to set your start",
+    t_armto:"Now search or click the map to set your destination", t_locating:"Finding your location…",
+    t_locerr:"Couldn't get your location — allow access or pick it on the map", t_swapped:"Route reversed",
+    add_stop:"Add stop", stop_label:"Stop", remove_stop:"Remove stop", search_ph_field:"Search a place…",
+    t_setstop:"Stop set", t_armstop:"Now search or click the map to set this stop", t_maxstops:"Maximum stops reached",
+    api_docs:"API docs & endpoints"
+  },
+  am: {
+    tagline:"ኢትዮጵያ · በራስ የተስተናገደ የካርታ መድረክ",
+    planroute:"መንገድ ያቅዱ",  directions:"አቅጣጫዎች", origin:"መነሻ", dest:"መድረሻ",
+    distance:"ርቀት", drivetime:"የጉዞ ጊዜ", clear:"መንገዱን ላጽዳ",
+
+
+    svc_tiles:"ካርታ ንጣፎች · Martin", svc_route:"መንገድ · OSRM", svc_search:"ፍለጋ · Photon",
+    base_street:"ጎዳና", base_satellite:"ሳተላይት", lang_default:"ነባሪ", lang_en:"እንግሊዝኛ", lang_am:"አማርኛ",
+    st_checking:"በመፈተሽ ላይ", st_online:"ይሰራል", st_offline:"ጠፍቷል", st_starting:"በመጀመር ላይ", st_building:"በመገንባት ላይ",
+    u_m:"ሜ", u_km:"ኪሜ", u_min:"ደቂቃ", u_h:"ሰ", u_steps:"ደረጃዎች",
+      t_calc:"መንገድ በማስላት ላይ…",
+    t_noroute:"በነዚህ ቦታዎች መካከል መንገድ አልተገኘም።", t_routeready:"መንገድ ዝግጁ ነው · {km} ኪሜ", t_cleared:"መንገዱ ጸድቷል",
+    t_nomatch:"አልተገኘም — በሌላ ቃል ይሞክሩ", t_basemap:"የካርታ ዓይነት · {x}", t_labels:"ስያሜዎች · {x}",
+    t_searcherr:"ፍለጋ አልተሳካም — Photon እየተገነባ ይሆን? ({e})", t_routeerr:"የመንገድ አገልግሎት አልተገኘም — ግንባታው አልቋል? ({e})",
+      my_location:"የእኔ አካባቢ", get_directions:"አቅጣጫ ያግኙ",
+     swap:"መንገዱን ይገልብጡ",
+    trip_hint:"ለእያንዳንዱ ማረፊያ ይፈልጉ፣ ካርታውን ይጫኑ ወይም አካባቢዎን ይጠቀሙ። ለማስተካከል ምልክቱን ይጎትቱ።",
+    t_setfrom:"መነሻ ተዘጋጅቷል — አሁን መድረሻ ይምረጡ", t_setto:"መድረሻ ተዘጋጅቷል", t_armfrom:"መነሻዎን ለማበጀት ይፈልጉ ወይም ካርታውን ይጫኑ",
+    t_armto:"መድረሻዎን ለማበጀት ይፈልጉ ወይም ካርታውን ይጫኑ", t_locating:"አካባቢዎን በማግኘት ላይ…",
+    t_locerr:"አካባቢዎን ማግኘት አልተቻለም — ፈቃድ ይስጡ ወይም በካርታው ይምረጡ", t_swapped:"መንገዱ ተገልብጧል",
+    add_stop:"ማረፊያ ይጨምሩ", stop_label:"ማረፊያ", remove_stop:"ማረፊያ ያስወግዱ", search_ph_field:"ቦታ ይፈልጉ…",
+    t_setstop:"ማረፊያ ተዘጋጅቷል", t_armstop:"ይህን ማረፊያ ለማበጀት ይፈልጉ ወይም ካርታውን ይጫኑ", t_maxstops:"ከዚህ በላይ ማረፊያ ማከል አይቻልም",
+    api_docs:"የኤፒአይ ሰነድ"
+  }
+};
+function uiLang() { return activeLang === "am" ? "am" : "en"; }
+function tr(k) { const L = uiLang(); return (I18N[L] && I18N[L][k] != null) ? I18N[L][k] : (I18N.en[k] != null ? I18N.en[k] : k); }
+function fmt(k, v) { return tr(k).replace(/\{(\w+)\}/g, (_, n) => (v && v[n] != null ? v[n] : "")); }
+function applyUILang() {
+  const L = uiLang();
+  document.documentElement.lang = L;
+  document.querySelectorAll("[data-i18n]").forEach(el => { const v = I18N[L][el.dataset.i18n]; if (v != null) el.textContent = v; });
+  document.querySelectorAll("[data-i18n-html]").forEach(el => { const v = I18N[L][el.dataset.i18nHtml]; if (v != null) el.innerHTML = v; });
+  if (typeof updateTripUI === "function") updateTripUI();   // re-translate stop labels + placeholders
+  if (lastRoute) { renderMetrics(lastRoute); renderSteps(lastRoute); }   // re-translate active directions
+}
+
+/* ------------------------------ basemaps -------------------------------- */
+/* Both styles (web/styles/) use our self-hosted Martin vector tiles via /tiles/.
+   Satellite-Hybrid is built from Bright (same roads/labels) over ESRI World
+   Imagery, so the two basemaps share styling, glyphs and sprite. */
+const BASEMAPS = [
+  { id: "street",    label: "Street",    style: "styles/Bright.json" },
+  { id: "satellite", label: "Satellite", style: "styles/Satellite-Hybrid.json" }
+];
+let activeBasemap = BASEMAPS.find(b => b.id === URLP.get("base")) || BASEMAPS[0];
+let activeLang = ["en", "am", "default"].includes(URLP.get("lang")) ? URLP.get("lang") : "default";   // used by i18n + geocoder (declared early to avoid TDZ)
+
+/* ---------------------------- map init ---------------------------------- */
+const map = new maplibregl.Map({
+  container: "map",
+  style: activeBasemap.style,
+  center: [39.6, 8.6],   // Ethiopia (overridden by #hash when present)
+  zoom: 5.4,
+  hash: true,            // zoom/lat/lng <-> URL #hash
+  attributionControl: { compact: true, customAttribution: "Open Karta" },
+  // Root-relative URLs (/tiles, /fonts, /sprites) can't be resolved inside
+  // MapLibre's worker (no document base) -> "Failed to parse URL". Absolutize
+  // them against the page origin here. Keeps the styles host-agnostic.
+  transformRequest: (url) => ({ url: url.charAt(0) === "/" ? location.origin + url : url })
+});
+// Standard controls are added LAST (see bottom) so the segmented toggles sit
+// above the zoom control in the top-right stack.
+
+// Keeps the top-right segmented toggles in sync when state changes via the panel.
+const toggleRefreshers = [];
+function syncToggles() { toggleRefreshers.forEach(fn => fn()); }
+
+/* ----------------------------- helpers ---------------------------------- */
+const $ = id => document.getElementById(id);
+let toastTimer;
+function toast(msg, kind="") {
+  const t = $("toast");
+  $("toastMsg").textContent = msg;
+  t.className = "toast show " + kind;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(()=> t.classList.remove("show"), 4200);
+}
+const fmtCoord = (lng,lat) => `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
+
+function markerEl(label, kind) {
+  const el = document.createElement("div");
+  el.className = "mk";
+  const fill = kind === "b" ? "#e2574a" : kind === "wp" ? "#e0a23a" : kind === "geo" ? "#36b39a" : "#5b86b3";
+  const tcol = kind === "b" ? "#fff" : "#081019";
+  el.innerHTML =
+    `<svg viewBox="0 0 30 38">
+       <path d="M15 37 C15 37 28 22 28 14 A13 13 0 1 0 2 14 C2 22 15 37 15 37Z" fill="${fill}" stroke="#0a111b" stroke-width="1.2"/>
+       <text class="glyph" x="15" y="18" text-anchor="middle" fill="${tcol}">${label}</text>
+     </svg>`;
+  return el;
+}
+
+/* ----------------------------- search ----------------------------------- */
+/* Photon (prefix/type-ahead) backs the inline search in every trip field.   */
+const esc = (s) => String(s == null ? "" : s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+// Shared Photon lookup: returns [{lng,lat,name,sub}] biased to the current view.
+async function photonSuggest(query, limit = 5) {
+  const c = map.getCenter();
+  const url = PHOTON + "/api?limit=" + limit +
+    "&lang=" + (uiLang() === "am" ? "am" : "en") +
+    "&lat=" + c.lat.toFixed(4) + "&lon=" + c.lng.toFixed(4) +
+    "&q=" + encodeURIComponent(query);
+  const res = await fetch(url);
+  if (!res.ok) throw new Error("HTTP " + res.status);
+  const data = await res.json();
+  return (data.features || []).map((f) => {
+    const p = f.properties || {};
+    const name = p.name || [p.street, p.housenumber].filter(Boolean).join(" ") || p.city || p.state || "Unnamed place";
+    const sub = [p.street, p.city, p.county, p.state, p.country]
+      .filter((v, i, a) => v && v !== name && a.indexOf(v) === i).slice(0, 3).join(", ");
+    const [lng, lat] = f.geometry.coordinates;
+    return { lng, lat, name, sub };
+  });
+}
+
+/* --------------------------- basemap switcher --------------------------- */
+function setBasemap(bm) {
+  if (bm === activeBasemap) return;
+  activeBasemap = bm;
+  setParam("base", bm.id);
+  map.setStyle(bm.style);   // accepts a style URL or an inline style object
+  toast(fmt("t_basemap", { x: tr("base_" + bm.id) }));
+  syncToggles();            // refresh the top-right basemap toggle
+  // setStyle wipes custom sources/layers + resets labels. Once the new style is
+  // ready, re-snapshot its labels, re-apply the chosen language, re-add the route.
+  // (A/B/search markers are DOM-based and persist.)
+  map.once("idle", () => { snapshotLabels(); applyLanguage(activeLang); if (currentRoute) addRouteLayers(currentRoute); });
+}
+
+/* ---------------------------- label language ---------------------------- */
+/* Switches map labels between the style default (bilingual), English and
+   Amharic, using the name:* fields in the OpenMapTiles vector tiles. */
+const LANGS = [
+  { id: "default", label: "Default" },
+  { id: "en",      label: "English" },
+  { id: "am",      label: "Amharic" }
+];
+const LANG_EXPR = {
+  en: ["coalesce", ["get", "name:en"], ["get", "name:latin"], ["get", "name"]],
+  am: ["coalesce", ["get", "name:am"], ["get", "name"]]
+};
+let labelOriginals = {};   // layerId -> pristine text-field for the current style
+
+function snapshotLabels() {
+  labelOriginals = {};
+  for (const l of map.getStyle().layers) {
+    if (l.type !== "symbol") continue;
+    const tf = l.layout && l.layout["text-field"];
+    if (tf && JSON.stringify(tf).includes('"name')) labelOriginals[l.id] = tf;  // name / name:* only
+  }
+}
+function applyLanguage(lang) {
+  activeLang = lang;
+  const expr = LANG_EXPR[lang];                 // undefined for "default" -> restore original
+  for (const id in labelOriginals) {
+    try { map.setLayoutProperty(id, "text-field", expr || labelOriginals[id]); } catch (e) {}
+  }
+}
+function selectLang(id) {
+  applyLanguage(id);          // map labels (sets activeLang)
+  applyUILang();              // overlay text + directions
+  setParam("lang", id === "default" ? null : id);
+  syncToggles();              // refresh the top-right language toggle
+  toast(fmt("t_labels", { x: tr("lang_" + id) }));
+}
+
+/* ---------------------------- routing (03) ------------------------------ */
+/* Ordered stops: index 0 = origin, last = destination, middle = waypoints.   */
+let stops = [null, null];              // each filled stop: { lng, lat, label }
+let markers = [null, null];            // maplibre Markers aligned 1:1 with stops
+let armed = null;                      // numeric stop index (or null) — next search/map-click fills it
+const MAX_STOPS = 8;
+let currentRoute = null;               // active route geometry (re-added across basemap switches)
+let lastRoute = null;                  // last OSRM route object (re-rendered when language changes)
+const filledStops = () => stops.filter(Boolean);
+const canRoute = () => stops.length >= 2 && stops.every(Boolean);
+
+/* --- turn-by-turn directions (OSRM steps) --- */
+const SVGI = (inner) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${inner}</svg>`;
+const MICON = {
+  depart:     SVGI('<path d="M3 11l19-9-9 19-2-8-8-2z"/>'),
+  arrive:     SVGI('<path d="M5 22V4"/><path d="M5 4h11l-2.5 4L16 12H5"/>'),
+  straight:   SVGI('<path d="M12 20V5"/><path d="m6 11 6-6 6 6"/>'),
+  left:       SVGI('<path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 5.5 5.5V20"/>'),
+  right:      SVGI('<path d="m15 14 5-5-5-5"/><path d="M20 9H9.5A5.5 5.5 0 0 0 4 14.5V20"/>'),
+  slightleft: SVGI('<path d="M8 16V8h8"/><path d="M18 18 8 8"/>'),
+  slightright:SVGI('<path d="M16 16V8H8"/><path d="M6 18 16 8"/>'),
+  uturn:      SVGI('<path d="M15 20v-9a3 3 0 0 0-6 0v3"/><path d="m6 11 3 3 3-3"/>'),
+  roundabout: SVGI('<circle cx="12" cy="13.5" r="5"/><path d="M12 8.5V3"/><path d="m9 5 3-3 3 3"/>'),
+  merge:      SVGI('<path d="M8 21V9"/><path d="m4 13 4-4 4 4"/><path d="M20 7c-5 0-8 2-8 7"/>'),
+  fork:       SVGI('<path d="M12 21v-7"/><path d="M12 14 6 7"/><path d="m12 14 6-7"/>')
+};
+function maneuverIcon(m) {
+  const t = m.type, mod = m.modifier || "";
+  let k = "straight";
+  if (t === "depart") k = "depart";
+  else if (t === "arrive") k = "arrive";
+  else if (t === "roundabout" || t === "rotary" || t === "roundabout turn") k = "roundabout";
+  else if (t === "merge") k = "merge";
+  else if (t === "fork") k = "fork";
+  else if (mod.indexOf("uturn") >= 0) k = "uturn";
+  else if (mod === "slight left") k = "slightleft";
+  else if (mod === "slight right") k = "slightright";
+  else if (mod.indexOf("left") >= 0) k = "left";
+  else if (mod.indexOf("right") >= 0) k = "right";
+  return MICON[k] || MICON.straight;
+}
+const MOD_EN = { "slight left":"slight left", "slight right":"slight right", "sharp left":"sharp left",
+                 "sharp right":"sharp right", "left":"left", "right":"right", "straight":"straight" };
+const MOD_AM = { "slight left":"ትንሽ ወደ ግራ", "slight right":"ትንሽ ወደ ቀኝ", "sharp left":"በደንብ ወደ ግራ",
+                 "sharp right":"በደንብ ወደ ቀኝ", "left":"ግራ", "right":"ቀኝ", "straight":"ቀጥታ" };
+function maneuverText(m, name) {
+  const mod = m.modifier || "";
+  const nm  = name ? `<b>${esc(name)}</b>` : "";
+  if (uiLang() === "am") {
+    const md = MOD_AM[mod] || mod, onto = name ? `፣ ${nm}` : "";
+    switch (m.type) {
+      case "depart":       return "ጉዞ ይጀምሩ";
+      case "arrive":       return "መድረሻዎ ደርሰዋል";
+      case "turn":
+      case "end of road":  return (mod.indexOf("uturn") >= 0 ? "ወደ ኋላ ይመለሱ" : `ወደ ${md} ይታጠፉ`) + onto;
+      case "continue":     return (mod && mod !== "straight" ? `ወደ ${md} ይቀጥሉ` : "ቀጥ ብለው ይቀጥሉ") + onto;
+      case "new name":     return "ይቀጥሉ" + onto;
+      case "merge":        return "ይቀላቀሉ" + onto;
+      case "on ramp":      return "መግቢያውን ይውሰዱ" + onto;
+      case "off ramp":     return "መውጫውን ይውሰዱ" + onto;
+      case "fork":         return `በመንታ መንገዱ ${md} ይያዙ`;
+      case "roundabout":
+      case "rotary":       return "ወደ ዙሪያ መንገዱ ይግቡ" + (m.exit ? `፣ ${m.exit}ኛ መውጫ` : "") + onto;
+      case "roundabout turn": return `በዙሪያ መንገዱ ወደ ${md} ይታጠፉ` + onto;
+      default:             return "ይቀጥሉ" + onto;
+    }
+  }
+  const md = MOD_EN[mod] || mod, onto = name ? ` onto ${nm}` : "", on = name ? ` on ${nm}` : "";
+  switch (m.type) {
+    case "depart":       return "Head out" + on;
+    case "arrive":       return "Arrive at your destination";
+    case "turn":
+    case "end of road":  return (mod.indexOf("uturn") >= 0 ? "Make a U-turn" : `Turn ${md}`) + onto;
+    case "continue":     return (mod && mod !== "straight" ? `Continue ${md}` : "Continue straight") + on;
+    case "new name":     return "Continue" + onto;
+    case "merge":        return `Merge ${md}`.trim() + onto;
+    case "on ramp":      return "Take the ramp" + onto;
+    case "off ramp":     return "Take the exit" + onto;
+    case "fork":         return `Keep ${md || "straight"} at the fork`;
+    case "roundabout":
+    case "rotary":       return "Enter the roundabout" + (m.exit ? `, exit ${m.exit}` : "") + onto;
+    case "roundabout turn": return `At the roundabout, turn ${md}`;
+    default:             return (m.type ? m.type[0].toUpperCase() + m.type.slice(1) : "Continue") + (md ? ` ${md}` : "") + on;
+  }
+}
+const fmtDist = (m) => m < 950 ? Math.round(m / 10) * 10 + " " + tr("u_m") : (m / 1000).toFixed(1) + " " + tr("u_km");
+function renderSteps(route) {
+  const steps = (route.legs || []).flatMap(l => l.steps || []);
+  $("steps").innerHTML = steps.map(s => {
+    const m = s.maneuver || {};
+    const cls = m.type === "depart" ? "depart" : m.type === "arrive" ? "arrive" : "";
+    const dist = (m.type === "arrive") ? "" : `<span class="step-dist">${fmtDist(s.distance)}</span>`;
+    return `<li><span class="step-ico ${cls}">${maneuverIcon(m)}</span>` +
+           `<span class="step-body"><span class="step-instr">${maneuverText(m, s.name)}</span>${dist}</span></li>`;
+  }).join("");
+  $("stepsCount").textContent = steps.length + " " + tr("u_steps");
+  $("stepsWrap").classList.add("show");
+}
+function renderMetrics(route) {
+  const km = route.distance / 1000;
+  $("mDist").innerHTML = km < 1
+    ? `${Math.round(route.distance)}<small> ${tr("u_m")}</small>`
+    : `${km.toFixed(1)}<small> ${tr("u_km")}</small>`;
+  const mins = Math.round(route.duration / 60);
+  $("mTime").innerHTML = mins < 60
+    ? `${mins}<small> ${tr("u_min")}</small>`
+    : `${Math.floor(mins / 60)}<small> ${tr("u_h")} </small>${mins % 60}<small> ${tr("u_min")}</small>`;
+  $("metrics").classList.add("show");
+}
+
+function addRouteLayers(geometry) {
+  if (map.getSource("route")) { map.getSource("route").setData({ type:"Feature", geometry }); return; }
+  map.addSource("route", { type:"geojson", data:{ type:"Feature", geometry } });
+  map.addLayer({ id:"route-glow", type:"line", source:"route",
+    layout:{ "line-cap":"round","line-join":"round" },
+    paint:{ "line-color":"#4aa8e0","line-opacity":.28,"line-width":["interpolate",["linear"],["zoom"],5,7,14,18] } });
+  map.addLayer({ id:"route-line", type:"line", source:"route",
+    layout:{ "line-cap":"round","line-join":"round" },
+    paint:{ "line-color":"#2f9fd6","line-width":["interpolate",["linear"],["zoom"],5,2.4,14,6] } });
+}
+
+/* ---- trip planner: ordered stops via search / map-click / my-location / drag ---- */
+function stopLabel(i) {
+  return i === 0 ? tr("origin") : i === stops.length - 1 ? tr("dest") : tr("stop_label") + " " + i;
+}
+function stopKind(i)  { return i === 0 ? "a" : i === stops.length - 1 ? "b" : "wp"; }
+function stopGlyph(i) { return i === 0 ? "A" : i === stops.length - 1 ? "B" : String(i); }
+function fmtStopLabel(stop) { return stop ? (stop.label || fmtCoord(stop.lng, stop.lat)) : ""; }
+
+/* --- draggable markers, kept aligned to stops[] --- */
+function makeMarker(i, stop) {
+  const mk = new maplibregl.Marker({ element: markerEl(stopGlyph(i), stopKind(i)), anchor: "bottom", draggable: true })
+              .setLngLat([stop.lng, stop.lat]).addTo(map);
+  mk.on("dragend", () => {
+    const idx = markers.indexOf(mk);            // identity lookup -> never stale after inserts/removes
+    if (idx === -1) return;
+    const ll = mk.getLngLat();
+    stops[idx] = { lng: ll.lng, lat: ll.lat, label: fmtCoord(ll.lng, ll.lat) };
+    syncFieldValue(idx); updateButtons();
+    if (canRoute()) fetchRoute(false); else clearRouteLine();   // don't re-frame mid-drag
+  });
+  return mk;
+}
+function rebuildMarkers() {
+  markers.forEach(m => m && m.remove());
+  markers = stops.map((s, i) => s ? makeMarker(i, s) : null);
+}
+function placeStop(i, stop) {
+  stops[i] = stop;
+  if (markers[i]) markers[i].remove();
+  markers[i] = makeMarker(i, stop);
+}
+function setStop(i, stop) {
+  closeAllAC();
+  placeStop(i, stop);
+  if (armed === i) armed = null;
+  const inp = inputEl(i);                       // commit the label even if the field is focused
+  if (inp) { inp.value = fmtStopLabel(stop); inp.blur(); }
+  setArmedClass(); updateButtons();
+  if (canRoute()) fetchRoute();
+  else { clearRouteLine(); toast(tr(i === 0 ? "t_setfrom" : i === stops.length - 1 ? "t_setto" : "t_setstop")); }
+}
+function armField(i) {
+  armed = (armed === i) ? null : i;
+  setArmedClass();
+  if (armed != null) toast(tr(armed === 0 ? "t_armfrom" : armed === stops.length - 1 ? "t_armto" : "t_armstop"));
+}
+
+/* --- dynamic rows --- */
+const RM_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"/></svg>';
+function renderTrip() {
+  const wrap = $("trip"); if (!wrap) return;
+  wrap.innerHTML = "";
+  stops.forEach((stop, i) => {
+    const isVia = i !== 0 && i !== stops.length - 1;
+    const row = document.createElement("div");
+    row.className = "trip-row"; row.dataset.i = i;
+    row.innerHTML =
+      `<span class="dot ${stopKind(i)}"></span>` +
+      `<div class="tf${armed === i ? " armed" : ""}">` +
+        `<label class="tf-lab">${esc(stopLabel(i))}</label>` +
+        `<input class="tf-in" type="text" autocomplete="off" spellcheck="false" ` +
+               `placeholder="${esc(tr("search_ph_field"))}" value="${esc(fmtStopLabel(stop))}" />` +
+        `<ul class="tf-ac" hidden></ul>` +
+      `</div>` +
+      (isVia ? `<button class="tf-rm" type="button" aria-label="${esc(tr("remove_stop"))}">${RM_SVG}</button>` : `<span></span>`);
+    wrap.appendChild(row);
+  });
+}
+function rowEl(i)   { return $("trip").children[i]; }
+function inputEl(i) { const r = rowEl(i); return r && r.querySelector(".tf-in"); }
+function acFor(i)   { const r = rowEl(i); return r && r.querySelector(".tf-ac"); }
+function syncFieldValue(i) {
+  const inp = inputEl(i);
+  if (inp && document.activeElement !== inp) inp.value = fmtStopLabel(stops[i]);
+}
+function setArmedClass() {
+  [...$("trip").children].forEach((row, i) => {
+    const tf = row.querySelector(".tf"); if (tf) tf.classList.toggle("armed", armed === i);
+  });
+}
+function updateButtons() {
+  const any = filledStops().length > 0;
+  if ($("go"))      $("go").disabled = !canRoute();
+  if ($("swap"))    $("swap").disabled = !any;
+  if ($("clear"))   $("clear").disabled = !(any || stops.length > 2);
+  if ($("addStop")) $("addStop").disabled = stops.length >= MAX_STOPS;
+}
+function updateTripUI() { renderTrip(); setArmedClass(); updateButtons(); }   // also used by applyUILang on language switch
+
+/* --- per-field autocomplete (delegated on #trip) --- */
+let acSeq = 0, acDebounce = null;
+function closeAC(i)   { const ac = acFor(i); if (ac) { ac.hidden = true; ac.innerHTML = ""; ac._items = null; } }
+function closeAllAC() { document.querySelectorAll("#trip .tf-ac").forEach(ac => { ac.hidden = true; ac.innerHTML = ""; ac._items = null; }); }
+function renderAC(i, items) {
+  const ac = acFor(i); if (!ac) return;
+  if (!items.length) { ac.innerHTML = `<li class="ac-empty">${esc(tr("t_nomatch"))}</li>`; ac._items = []; ac.hidden = false; return; }
+  ac.innerHTML = items.map((it, k) =>
+    `<li data-k="${k}"${k === 0 ? ' class="active"' : ''}><div class="ac-name">${esc(it.name)}</div>` +
+    (it.sub ? `<div class="ac-sub">${esc(it.sub)}</div>` : "") + `</li>`).join("");
+  ac._items = items; ac.hidden = false;
+}
+function pickAC(i, k) {
+  const ac = acFor(i); if (!ac || !ac._items) return;
+  const it = ac._items[k]; if (!it) return;
+  closeAC(i);
+  setStop(i, { lng: it.lng, lat: it.lat, label: it.name });
+  const inp = inputEl(i); if (inp) inp.blur();
+}
+function moveAC(i, dir) {
+  const ac = acFor(i); if (!ac || ac.hidden) return;
+  const lis = [...ac.querySelectorAll("li[data-k]")]; if (!lis.length) return;
+  let idx = lis.findIndex(li => li.classList.contains("active"));
+  idx = (idx + dir + lis.length) % lis.length;
+  lis.forEach(li => li.classList.remove("active")); lis[idx].classList.add("active");
+  lis[idx].scrollIntoView({ block: "nearest" });
+}
+$("trip").addEventListener("input", (e) => {
+  const inp = e.target.closest(".tf-in"); if (!inp) return;
+  const i = +inp.closest(".trip-row").dataset.i, q = inp.value.trim();
+  clearTimeout(acDebounce);
+  if (q.length < 2) { closeAC(i); return; }
+  const seq = ++acSeq;
+  acDebounce = setTimeout(async () => {
+    try { const items = await photonSuggest(q, 5); if (seq === acSeq) renderAC(i, items); }
+    catch (err) { if (seq === acSeq) { closeAC(i); toast(fmt("t_searcherr", { e: err.message }), "err"); } }
+  }, 250);
+});
+$("trip").addEventListener("focusin", (e) => {
+  const inp = e.target.closest(".tf-in"); if (!inp) return;
+  armed = +inp.closest(".trip-row").dataset.i; setArmedClass();
+});
+$("trip").addEventListener("focusout", (e) => {
+  const inp = e.target.closest(".tf-in"); if (!inp) return;
+  const i = +inp.closest(".trip-row").dataset.i;
+  setTimeout(() => closeAC(i), 130);   // let a suggestion mousedown land first
+  syncFieldValue(i);                    // restore committed label if the user typed but didn't pick
+});
+$("trip").addEventListener("keydown", (e) => {
+  const inp = e.target.closest(".tf-in"); if (!inp) return;
+  const i = +inp.closest(".trip-row").dataset.i, ac = acFor(i);
+  if (e.key === "ArrowDown") { e.preventDefault(); moveAC(i, 1); }
+  else if (e.key === "ArrowUp") { e.preventDefault(); moveAC(i, -1); }
+  else if (e.key === "Enter" && ac && !ac.hidden) { e.preventDefault(); const a = ac.querySelector("li.active"); pickAC(i, a ? +a.dataset.k : 0); }
+  else if (e.key === "Escape") { closeAC(i); }
+});
+$("trip").addEventListener("mousedown", (e) => {   // select before blur fires
+  const li = e.target.closest(".tf-ac li[data-k]"); if (!li) return;
+  e.preventDefault();
+  pickAC(+li.closest(".trip-row").dataset.i, +li.dataset.k);
+});
+$("trip").addEventListener("click", (e) => {       // remove a waypoint
+  const rm = e.target.closest(".tf-rm"); if (!rm) return;
+  const i = +rm.closest(".trip-row").dataset.i;
+  if (i === 0 || i === stops.length - 1) return;
+  if (markers[i]) markers[i].remove();
+  stops.splice(i, 1); markers.splice(i, 1);
+  if (armed === i) armed = null; else if (armed != null && armed > i) armed--;
+  rebuildMarkers(); renderTrip(); setArmedClass(); updateButtons();
+  if (canRoute()) fetchRoute(); else clearRouteLine();
+});
+
+function clearRouteLine() {
+  currentRoute = null; lastRoute = null;
+  if (map.getLayer("route-line")) map.removeLayer("route-line");
+  if (map.getLayer("route-glow")) map.removeLayer("route-glow");
+  if (map.getSource("route")) map.removeSource("route");
+  $("metrics").classList.remove("show");
+  $("stepsWrap").classList.remove("show");
+  $("steps").innerHTML = "";
+  setParam("route", null);
+}
+function resetTrip() {
+  markers.forEach(m => m && m.remove());
+  stops = [null, null]; markers = [null, null]; armed = null;
+  clearRouteLine(); renderTrip(); updateButtons();
+}
+
+$("addStop").addEventListener("click", () => {
+  if (stops.length >= MAX_STOPS) { toast(tr("t_maxstops")); return; }
+  const at = stops.length - 1;            // insert a waypoint just before the destination
+  stops.splice(at, 0, null); markers.splice(at, 0, null);
+  rebuildMarkers(); renderTrip(); updateButtons();
+  armed = at; setArmedClass();
+  const inp = inputEl(at); if (inp) inp.focus();
+});
+$("clear").addEventListener("click", () => { resetTrip(); toast(tr("t_cleared")); });
+$("go").addEventListener("click", () => { if (canRoute()) fetchRoute(); });
+$("useLoc").addEventListener("click", () => {
+  if (!navigator.geolocation) { toast(tr("t_locerr"), "err"); return; }
+  toast(tr("t_locating"));
+  const target = (armed != null) ? armed : 0;   // fill the focused field, else origin
+  navigator.geolocation.getCurrentPosition(
+    (pos) => {
+      const lng = pos.coords.longitude, lat = pos.coords.latitude;
+      setStop(target, { lng, lat, label: tr("my_location") });
+      map.flyTo({ center: [lng, lat], zoom: Math.max(map.getZoom(), 12) });
+    },
+    () => toast(tr("t_locerr"), "err"),
+    { enableHighAccuracy: true, timeout: 8000 }
+  );
+});
+$("swap").addEventListener("click", () => {
+  if (filledStops().length < 1) return;
+  stops.reverse();
+  rebuildMarkers(); armed = null;
+  renderTrip(); updateButtons();
+  if (canRoute()) fetchRoute(); else clearRouteLine();
+  toast(tr("t_swapped"));
+});
+$("stepsToggle").addEventListener("click", () => {
+  const collapsed = $("stepsWrap").classList.toggle("collapsed");
+  $("stepsToggle").setAttribute("aria-expanded", String(!collapsed));
+});
+
+map.on("click", (e) => {
+  closeAllAC();
+  const stop = { lng: e.lngLat.lng, lat: e.lngLat.lat, label: fmtCoord(e.lngLat.lng, e.lngLat.lat) };
+  let i = (armed != null) ? armed : stops.findIndex(s => !s);
+  if (i === -1) { resetTrip(); i = 0; }   // all slots full -> start a fresh trip
+  setStop(i, stop);
+});
+
+async function fetchRoute(fit = true) {
+  if (!canRoute()) return;
+  toast(tr("t_calc"));
+  try {
+    const coordStr = stops.map(s => `${s.lng},${s.lat}`).join(";");
+    const url = `${OSRM}/route/v1/driving/${coordStr}?overview=full&geometries=geojson&steps=true`;
+    const res = await fetch(url);
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    const data = await res.json();
+    if (data.code !== "Ok" || !data.routes || !data.routes.length) { toast(tr("t_noroute"), "err"); return; }
+    const route = data.routes[0];
+    currentRoute = route.geometry;
+    lastRoute = route;
+    addRouteLayers(currentRoute);
+    setParam("route", stops.map(s => `${s.lng.toFixed(5)},${s.lat.toFixed(5)}`).join(";"));
+    renderMetrics(route);
+    renderSteps(route);
+    if (fit) {
+      const c = route.geometry.coordinates;
+      const b = c.reduce((bb, xy) => bb.extend(xy), new maplibregl.LngLatBounds(c[0], c[0]));
+      map.fitBounds(b, { padding: { top: 60, bottom: 60, left: 410, right: 60 }, duration: 900 });
+    }
+    toast(fmt("t_routeready", { km: (route.distance / 1000).toFixed(1) }), "ok");
+  } catch (err) {
+    toast(fmt("t_routeerr", { e: err.message }), "err");
+  }
+}
+
+/* ---------------------- restore shareable state ------------------------- */
+function initFromURL() {
+  const route = URLP.get("route");
+  if (!route) return;
+  const segs = route.split(";").map(s => s.split(",").map(Number)).filter(s => s.length === 2 && s.every(isFinite));
+  if (segs.length < 2) return;
+  stops = segs.map(([lng, lat]) => ({ lng, lat, label: fmtCoord(lng, lat) }));
+  markers = stops.map(() => null);
+  rebuildMarkers(); renderTrip(); updateButtons();
+  fetchRoute(!HAD_HASH);   // keep a pinned camera; otherwise frame the route
+}
+
+/* ---------------------- live coordinate readout ------------------------- */
+map.on("mousemove", (e) => {
+  $("cx").textContent = e.lngLat.lng.toFixed(4);
+  $("cy").textContent = e.lngLat.lat.toFixed(4);
+});
+map.on("zoom", () => { $("cz").textContent = map.getZoom().toFixed(1); });
+map.on("load", () => { $("cz").textContent = map.getZoom().toFixed(1); snapshotLabels(); applyLanguage(activeLang); initFromURL(); });
+
+map.on("error", (e) => {
+  // Surface map errors instead of swallowing them (a silent handler here once
+  // hid a tile-decoding bug). Still flag the tiles dot when it's tile-related.
+  const msg = (e && e.error && e.error.message) || String((e && e.error) || e);
+  console.warn("[map]", msg);
+});
+
+applyUILang();      // localise the overlay to the active language on first load
+
+/* ---- top-right segmented toggles: label language + basemap (the only switchers now) ---- */
+const LANG_NATIVE = { default: "Default", en: "English", am: "አማርኛ" };   // languages shown in their own name
+function segGroup(items, activeFn, labelFn, onSelect) {
+  const g = document.createElement("div");
+  g.className = "ok-seg";
+  const render = () => {
+    g.innerHTML = "";
+    items.forEach((it) => {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.textContent = labelFn(it);
+      if (it.id === activeFn()) b.classList.add("active");
+      b.addEventListener("click", () => onSelect(it.id));
+      g.appendChild(b);
+    });
+  };
+  render();
+  toggleRefreshers.push(render);
+  return g;
+}
+map.addControl({
+  onAdd() {
+    const c = document.createElement("div");
+    c.className = "maplibregl-ctrl ok-segs";
+    c.appendChild(segGroup(LANGS, () => activeLang, (it) => LANG_NATIVE[it.id], (id) => selectLang(id)));
+    c.appendChild(segGroup(BASEMAPS, () => activeBasemap.id, (it) => tr("base_" + it.id), (id) => setBasemap(BASEMAPS.find(b => b.id === id))));
+    this._c = c; return c;
+  },
+  onRemove() { this._c.remove(); }
+}, "top-right");
+
+// Standard controls added after the toggles so they stack BELOW them (toggles above the zoom).
+map.addControl(new maplibregl.NavigationControl({ visualizePitch: true, visualizeRoll: true, showZoom: true, showCompass: true }), "top-right");
+map.addControl(new maplibregl.GeolocateControl({ positionOptions: { enableHighAccuracy: true }, trackUserLocation: true }), "top-right");
+map.addControl(new maplibregl.FullscreenControl(), "top-right");
+
+/* ---------------------------- panel collapse ---------------------------- */
+(function () {
+  const panel = document.querySelector(".panel"), t = $("toggle");
+  t.addEventListener("click", () => {
+    const collapsed = panel.classList.toggle("collapsed");
+    t.setAttribute("aria-expanded", String(!collapsed));
+    t.setAttribute("aria-label", collapsed ? "Expand panel" : "Collapse panel");
+    t.title = collapsed ? "Expand panel" : "Collapse panel";
+  });
+})();
+</script>
+</body>
+</html>

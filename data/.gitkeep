@@ -1,0 +1,6 @@
+# Shared data volume. Populated at runtime by the data-pipeline:
+#   ethiopia-latest.osm.pbf      (Geofabrik OSM extract)
+#   ethiopia-latest.mbtiles      (Planetiler OpenMapTiles vector tiles)
+#   ethiopia-latest.osrm.*       (OSRM routing graph)
+#   sources/                     (Planetiler auxiliary downloads)
+#   .tiles_ready / .osrm_ready   (build sentinels read by the engine containers)

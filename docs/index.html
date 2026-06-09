@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Open Karta — API Reference</title>
+  <meta name="description" content="Open Karta — self-hosted Ethiopia geospatial stack. Reference for every reverse-proxied endpoint." />
+  <link rel="stylesheet" href="vendor/vue.css" />
+  <style>
+    :root { --theme-color:#3e5c80; }
+    .markdown-section { max-width: 880px; }
+    .markdown-section code { color:#9a3a24; }
+    .sidebar-nav strong { color:#3e5c80; font-size:12px; letter-spacing:.04em; text-transform:uppercase; }
+    .markdown-section table { display:table; width:100%; }
+    .markdown-section tr:nth-child(2n) { background:#f7f9fc; }
+  </style>
+</head>
+<body>
+  <div id="app">Loading the Open Karta API reference…</div>
+  <script>
+    window.$docsify = {
+      name: 'Open&nbsp;Karta',
+      nameLink: '#/',
+      loadSidebar: true,
+      subMaxLevel: 3,
+      auto2top: true,
+      homepage: 'README.md',
+      themeColor: '#3e5c80',
+      search: {
+        placeholder: 'Search the docs…',
+        noData: 'Nothing found — try another term.',
+        depth: 4
+      }
+    };
+  </script>
+  <script src="vendor/docsify.min.js"></script>
+  <script src="vendor/search.min.js"></script>
+  <script src="vendor/prism-bash.min.js"></script>
+  <script src="vendor/prism-json.min.js"></script>
+</body>
+</html>

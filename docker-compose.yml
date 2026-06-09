@@ -1,0 +1,184 @@
+# ==========================================================================
+#  Open Karta — self-hosted open-source geospatial stack for Ethiopia
+# ==========================================================================
+#  Quick start (run from THIS directory so $PWD resolves correctly):
+#
+#      docker compose up -d
+#      open http://localhost:8000
+#
+#  Endpoints once the pipeline has finished its first build:
+#      :8000  web showcase            :3000  Martin vector tiles (TileJSON /ethiopia-latest)
+#      :5000  OSRM routing            :8080  Nominatim geocoding (via CORS proxy)
+#
+#  First boot does a heavy one-time build (Planetiler + OSRM + Nominatim import).
+#  The tile/routing servers WAIT for the pipeline (sentinel files) instead of
+#  crash-looping, so an empty ./data on first `up` is handled gracefully.
+# ==========================================================================
+name: open-karta
+
+networks:
+  karta-network:
+    driver: bridge
+
+volumes:
+  nominatim-data: # persists the Nominatim PostgreSQL import across restarts
+  photon-index: # persists Photon's OpenSearch autocomplete index
+
+services:
+  # ---------------------------------------------------------------------------
+  # 1) Data pipeline & orchestrator
+  #    Alpine + curl + docker-cli. Talks to the HOST docker daemon via the
+  #    mounted socket to launch transient build containers, then hot-reloads
+  #    the tile + routing servers. Loops every $INTERVAL seconds (24h default).
+  # ---------------------------------------------------------------------------
+  data-pipeline:
+    image: alpine:latest
+    container_name: ok_data_pipeline
+    restart: unless-stopped
+    networks: [karta-network]
+    working_dir: /work
+    environment:
+      # Absolute HOST path to ./data. REQUIRED: sibling containers launched via
+      # the docker socket resolve bind-mount sources on the HOST, not in this
+      # container, so "$(pwd)/data" from inside here would point nowhere.
+      HOST_DATA_DIR: "${PWD:-/home/sam/Desktop/openkarta.et/basic}/data"
+      PBF_URL: "https://download.geofabrik.de/africa/ethiopia-latest.osm.pbf"
+      INTERVAL: "86400"
+      PLANETILER_XMX: "4g"
+    volumes:
+      - ./data:/data
+      - ./pipeline/run.sh:/run.sh:ro
+      - /var/run/docker.sock:/var/run/docker.sock
+    entrypoint: ["/bin/sh", "/run.sh"]
+
+  # ---------------------------------------------------------------------------
+  # 2) Vector tile server (Martin) — serves OpenMapTiles-schema MVT.
+  #    Waits for the pipeline's .tiles_ready sentinel so it never crash-loops
+  #    on a freshly-empty ./data volume.
+  # ---------------------------------------------------------------------------
+  tile-server:
+    image: ghcr.io/maplibre/martin:latest
+    container_name: ok_tile_server
+    restart: unless-stopped
+    networks: [karta-network]
+    depends_on: [data-pipeline]
+    expose:
+      - "3000"            # internal only — reached via the :8000 proxy at /tiles/
+    volumes:
+      - ./data:/data
+    # NOTE: the shell script MUST be a single argv element. A plain string
+    # `command:` is shlex-split by Compose into separate words, so `sh -c`
+    # would receive only `until` and crash-loop ("Syntax error ... expecting
+    # do"). Putting the whole script as the 3rd entrypoint element fixes that.
+    entrypoint:
+      - /bin/sh
+      - -c
+      - 'until [ -f /data/.tiles_ready ]; do echo "[martin] waiting for ethiopia-latest.mbtiles..."; sleep 15; done; exec martin /data/ethiopia-latest.mbtiles'
+    command: []
+
+  # ---------------------------------------------------------------------------
+  # 4) Routing engine (OSRM) — car profile, MLD algorithm.
+  #    Waits for the pipeline's .osrm_ready sentinel before serving.
+  # ---------------------------------------------------------------------------
+  routing-engine:
+    image: osrm/osrm-backend:latest
+    container_name: ok_routing_engine
+    restart: unless-stopped
+    networks: [karta-network]
+    depends_on: [data-pipeline]
+    expose:
+      - "5000"            # internal only — reached via the :8000 proxy at /osrm/
+    volumes:
+      - ./data:/data
+    # See tile-server note: the script must be one argv element, not a string.
+    entrypoint:
+      - /bin/sh
+      - -c
+      - 'until [ -f /data/.osrm_ready ]; do echo "[osrm] waiting for routing graph..."; sleep 15; done; exec osrm-routed --algorithm mld --max-matching-size 10000 --max-table-size 10000 /data/ethiopia-latest.osrm'
+    command: []
+
+  # ---------------------------------------------------------------------------
+  # 5) Geocoder (Nominatim). Self-imports from Geofabrik via PBF_URL so it can
+  #    never crash-loop waiting on the shared file (guardrail: graceful empty
+  #    state). Internal only — reached via the :8000 proxy at /nominatim/
+  #    (which also normalises CORS, so no separate shim is needed).
+  # ---------------------------------------------------------------------------
+  geocoder:
+    image: mediagis/nominatim:4.5
+    container_name: ok_geocoder
+    restart: unless-stopped
+    networks: [karta-network]
+    environment:
+      PBF_PATH: "/data/ethiopia-latest.osm.pbf"
+      NOMINATIM_PASSWORD: "openkarta"
+    shm_size: "1gb"
+    volumes:
+      # Mount at the postgres root (version-agnostic) so the import persists
+      # regardless of the image's bundled PostgreSQL major version.
+      - nominatim-data:/var/lib/postgresql
+      - ./data:/data
+    expose:
+      - "8080"
+
+  # ---------------------------------------------------------------------------
+  # 6) Web showcase (static MapLibre GL app served by nginx).
+  # ---------------------------------------------------------------------------
+  # ---------------------------------------------------------------------------
+  # 7) Photon — type-ahead (prefix) autocomplete geocoder. Builds its embedded
+  #    OpenSearch index from the Nominatim DB on first start (Ethiopia only),
+  #    then serves /api on :2322 with CORS. Nominatim can't do char-prefix
+  #    matching; Photon can ("Ayer Ten" -> "Ayer Tena").
+  # ---------------------------------------------------------------------------
+  photon:
+    image: eclipse-temurin:21-jre
+    container_name: ok_photon
+    restart: unless-stopped
+    networks: [karta-network]
+    depends_on: [geocoder]
+    environment:
+      NOMINATIM_HOST: ok_geocoder
+      NOMINATIM_PASSWORD: openkarta
+      JAVA_TOOL_OPTIONS: "-Xmx4g"
+    volumes:
+      - ./photon:/opt/photon:ro # photon jar + run.sh
+      - photon-index:/photon # persisted OpenSearch index (photon_data/)
+    entrypoint: ["/bin/sh", "/opt/photon/run.sh"]
+    expose:
+      - "2322"            # internal only — reached via the :8000 proxy at /photon/
+
+  # ---------------------------------------------------------------------------
+  # 7b) VROOM — vehicle-routing optimisation (VRP: vehicles + jobs/shipments).
+  #     Uses the OSRM driver pointed at our routing-engine for the cost matrix.
+  #     Internal only — reached via the :8000 proxy at /vroom/.
+  # ---------------------------------------------------------------------------
+  vroom:
+    image: ghcr.io/vroom-project/vroom-docker:latest
+    container_name: ok_vroom
+    restart: unless-stopped
+    networks: [karta-network]
+    depends_on: [routing-engine]
+    environment:
+      VROOM_ROUTER: osrm
+    volumes:
+      - ./vroom/config.yml:/conf/config.yml:ro   # osrm -> ok_routing_engine:5000
+    expose:
+      - "3000"
+
+  # ---------------------------------------------------------------------------
+  # 8) Web showcase + single public gateway. Serves the MapLibre app, the
+  #    docsify API reference at /docs, AND reverse-proxies every backend
+  #    same-origin (/tiles/ /osrm/ /photon/ /nominatim/) — so the browser
+  #    only ever talks to :8000.
+  # ---------------------------------------------------------------------------
+  web-showcase:
+    image: nginx:alpine
+    container_name: ok_web_showcase
+    restart: unless-stopped
+    networks: [karta-network]
+    depends_on: [tile-server, routing-engine, geocoder, photon, vroom]
+    ports:
+      - "8000:80"
+    volumes:
+      - ./web:/usr/share/nginx/html:ro            # index.html + styles/
+      - ./docs:/srv/docs:ro                       # docsify API reference (served at /docs)
+      - ./proxy/web.conf:/etc/nginx/conf.d/default.conf:ro # static + /docs + reverse proxy
