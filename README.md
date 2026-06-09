@@ -166,6 +166,7 @@ disables — expect a few seconds of search downtime during a reindex).
 | Search box empty / no suggestions | Photon index still building, or `:2322` unreachable — verify with the curl in step 5. |
 | Port `:8000` already in use | It's the only published port — stop the conflicting process or remap it in `docker-compose.yml`. |
 | A backend endpoint 404s right after editing `proxy/web.conf` | nginx single-file bind-mounts pin the inode; **recreate** (not just restart) the gateway: `docker compose up -d --force-recreate web-showcase`. |
+| A backend endpoint 502s after you **recreate** that backend | nginx resolves upstream container IPs at startup, and a recreate hands out a new IP (the pipeline's `docker restart`s keep it). Restart the gateway: `docker compose restart web-showcase`. |
 | `docker compose` errors `required variable PWD` | Run it from the project root — the pipeline bind-mounts `./data` by **host** path (`$PWD/data`), and compose now refuses to guess. |
 
 ## What the showcase does

@@ -124,7 +124,7 @@ services:
         - CMD
         - bash
         - -c
-        - 'exec 3<>/dev/tcp/127.0.0.1/5000 && printf "GET /route/v1/driving/38.74,9.03;38.76,8.54?overview=false HTTP/1.0\r\n\r\n" >&3 && grep -q "\"code\":\"Ok\"" <&3'
+        - 'exec 3<>/dev/tcp/127.0.0.1/5000 && printf "GET /route/v1/driving/38.74,9.03;38.76,8.54?overview=false HTTP/1.0\r\nConnection: close\r\n\r\n" >&3 && grep -q "\"code\":\"Ok\"" <&3'
       interval: 30s
       timeout: 5s
       retries: 3
