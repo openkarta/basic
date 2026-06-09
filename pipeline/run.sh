@@ -33,7 +33,7 @@ PBF_URL="${PBF_URL:-https://download.geofabrik.de/africa/ethiopia-latest.osm.pbf
 # Pinned builder images (compose sets these). OSRM_IMAGE must match the
 # routing-engine service image — the graph format is version-specific.
 PLANETILER_IMAGE="${PLANETILER_IMAGE:-ghcr.io/onthegomap/planetiler:0.8.2}"
-OSRM_IMAGE="${OSRM_IMAGE:-osrm/osrm-backend:v5.27.1}"
+OSRM_IMAGE="${OSRM_IMAGE:-osrm/osrm-backend:v5.25.0}"
 PHOTON_REINDEX_DAYS="${PHOTON_REINDEX_DAYS:-7}"
 
 # Absolute HOST path to ./data — required for sibling-container bind mounts.

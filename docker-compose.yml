@@ -58,7 +58,7 @@ services:
       # Pinned builder images. OSRM_IMAGE MUST match the routing-engine image
       # below — the graph format is version-specific.
       PLANETILER_IMAGE: "ghcr.io/onthegomap/planetiler:0.8.2"
-      OSRM_IMAGE: "osrm/osrm-backend:v5.27.1"
+      OSRM_IMAGE: "osrm/osrm-backend:v5.25.0"
       # Rebuild Photon's index from Nominatim when older than this (0 = never).
       PHOTON_REINDEX_DAYS: "7"
     volumes:
@@ -98,7 +98,7 @@ services:
   #    Image must stay in lockstep with the pipeline's OSRM_IMAGE (above).
   # ---------------------------------------------------------------------------
   routing-engine:
-    image: osrm/osrm-backend:v5.27.1
+    image: osrm/osrm-backend:v5.25.0
     container_name: ok_routing_engine
     restart: unless-stopped
     networks: [karta-network]

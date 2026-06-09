@@ -273,11 +273,12 @@ These were required to make the stack actually run out of the box:
   time-conditional (`curl -z`), so unchanged upstream data costs no bandwidth.
 - **Reset everything:** `docker compose down -v` (the `-v` also drops the
   Nominatim DB volume; the next `up` re-imports).
-- **Versions:** every image is pinned (Planetiler `0.8.2`, OSRM `v5.27.1`,
+- **Versions:** every image is pinned (Planetiler `0.8.2`, OSRM `v5.25.0`,
   Martin `v0.14.2`, VROOM `v1.14.0`, Nominatim `4.5`, nginx `1.27-alpine`,
-  alpine `3.21`) for reproducible builds — bump them deliberately. The
-  pipeline's `OSRM_IMAGE` and the `routing-engine` image must move in
-  **lockstep**: the graph format is version-specific.
+  alpine `3.21`) for reproducible builds — bump them deliberately. OSRM's
+  Docker Hub tags stop at `v5.25.0` (no image was published for newer
+  releases). The pipeline's `OSRM_IMAGE` and the `routing-engine` image must
+  move in **lockstep**: the graph format is version-specific.
 - **Esri imagery terms:** the Satellite basemap hot-links Esri World Imagery
   tiles (the only off-host asset). Review Esri's terms of use before any
   public-facing deployment.
