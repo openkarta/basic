@@ -30,7 +30,19 @@
         placeholder: 'Search the docs…',
         noData: 'Nothing found — try another term.',
         depth: 4
-      }
+      },
+      // The docs are served by the same gateway as the API, so rewrite the
+      // example base URL (localhost:8000) to whatever host you're viewing from.
+      plugins: [
+        function originRewrite(hook) {
+          var ORIGIN = window.location.origin;   // e.g. https://open.karta.et
+          var HOST   = window.location.host;     // e.g. open.karta.et
+          hook.beforeEach(function (md) {
+            return md.split('http://localhost:8000').join(ORIGIN)
+                     .split('localhost:8000').join(HOST);
+          });
+        }
+      ]
     };
   </script>
   <script src="vendor/docsify.min.js"></script>
