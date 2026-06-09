@@ -97,7 +97,9 @@ while true; do
   # success: Martin keeps the old inode open until its restart, so a failed or
   # partial build can never be served.
   echo "[pipeline] [2/4] building vector tiles with Planetiler (Xmx=${XMX})..."
-  MBT_NEW="${MBTILES}.new"
+  # The temp name must KEEP the .mbtiles extension — Planetiler infers the
+  # archive format from it (a ".new" suffix fails with "Unsupported format").
+  MBT_NEW="${MBTILES%.mbtiles}.new.mbtiles"
   rm -f "$MBT_NEW" "${MBT_NEW}-journal"
   PT_ATTEMPT=1; PT_MAX=4
   while [ "$PT_ATTEMPT" -le "$PT_MAX" ]; do
@@ -107,7 +109,7 @@ while true; do
           -v "${HOST_DATA_DIR}":/data \
           "$PLANETILER_IMAGE" \
           --osm-path=/data/ethiopia-latest.osm.pbf \
-          --output=/data/ethiopia-latest.mbtiles.new \
+          --output="$MBT_NEW" \
           --download --download-dir=/data/sources \
           --force; then
       mv -f "$MBT_NEW" "$MBTILES"
