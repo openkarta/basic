@@ -206,18 +206,9 @@
   .ok-seg button:hover { background:rgba(111,155,203,.12); color:var(--parchment); }
   .ok-seg button.active { background:var(--saffron); color:#081019; }   /* selected segment (matches panel switchers) */
 
-  /* footer telemetry */
+  /* footer */
   .foot { border-top:1px solid var(--line); padding:13px 20px 14px;
           background:linear-gradient(180deg, transparent, rgba(0,0,0,.25)); }
-  .svc { display:flex; align-items:center; gap:9px; padding:3px 0; font-size:12px; }
-  .dot { width:8px; height:8px; border-radius:50%; flex:0 0 auto; background:var(--faint);
-         box-shadow:0 0 0 0 rgba(0,0,0,0); transition:.3s; }
-  .dot.on    { background:var(--emerald);    box-shadow:0 0 9px rgba(63,174,116,.7); }
-  .dot.warn  { background:var(--amber);       box-shadow:0 0 9px rgba(224,162,58,.6); animation:pulse 1.4s infinite; }
-  .dot.off   { background:#5a4631; }
-  .svc .name { color:var(--muted); }
-  .svc .state { margin-left:auto; font-family:"JetBrains Mono","Noto Sans Ethiopic",monospace; font-size:10px;
-                letter-spacing:.1em; text-transform:uppercase; color:var(--faint); }
   .coords { margin-top:10px; padding-top:10px; border-top:1px dashed var(--line);
             font-family:"JetBrains Mono","Noto Sans Ethiopic",monospace; font-size:10.5px; color:var(--faint);
             display:flex; justify-content:space-between; }
@@ -258,7 +249,6 @@
 
   /* intro animation */
   @keyframes rise { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:none; } }
-  @keyframes pulse { 0%,100%{ box-shadow:0 0 0 0 rgba(224,162,58,.5);} 50%{ box-shadow:0 0 0 5px rgba(224,162,58,0);} }
   .reveal { opacity:0; animation:rise .6s cubic-bezier(.2,.8,.2,1) forwards; }
 
   @media (max-width:560px){
@@ -354,7 +344,7 @@ const PHOTON = "/photon";   // type-ahead autocomplete
 
 /* --------------------------- shareable URL state ------------------------ */
 /* Camera (zoom/lat/lng) lives in the map #hash (MapLibre `hash: true`).
-   Everything else is query params: base, lang, place (+plabel), route.       */
+   Everything else is query params: base, lang, route.                        */
 const URLP = new URLSearchParams(location.search);
 const HAD_HASH = !!location.hash;     // did the shared link pin the camera?
 function setParam(key, val) {
@@ -370,12 +360,8 @@ const I18N = {
   en: {
     tagline:"Ethiopia · Self-hosted Geospatial Stack",
     planroute:"Plan a route",  directions:"Directions", origin:"Origin", dest:"Destination",
-    distance:"Distance", drivetime:"Drive time", clear:"Clear route",
-
-
-    svc_tiles:"Vector tiles · Martin", svc_route:"Routing · OSRM", svc_search:"Search · Photon",
+    distance:"Distance", drivetime:"Drive time",
     base_street:"Streets", base_satellite:"Satellite", lang_default:"Default", lang_en:"English", lang_am:"Amharic",
-    st_checking:"checking", st_online:"online", st_offline:"offline", st_starting:"starting", st_building:"building",
     u_m:"m", u_km:"km", u_min:"min", u_h:"h", u_steps:"steps",
       t_calc:"Calculating route…",
     t_noroute:"No route found between those points.", t_routeready:"Route ready · {km} km", t_cleared:"Route cleared",
@@ -394,12 +380,8 @@ const I18N = {
   am: {
     tagline:"ኢትዮጵያ · በራስ የተስተናገደ የካርታ መድረክ",
     planroute:"መንገድ ያቅዱ",  directions:"አቅጣጫዎች", origin:"መነሻ", dest:"መድረሻ",
-    distance:"ርቀት", drivetime:"የጉዞ ጊዜ", clear:"መንገዱን ላጽዳ",
-
-
-    svc_tiles:"ካርታ ንጣፎች · Martin", svc_route:"መንገድ · OSRM", svc_search:"ፍለጋ · Photon",
+    distance:"ርቀት", drivetime:"የጉዞ ጊዜ",
     base_street:"ጎዳና", base_satellite:"ሳተላይት", lang_default:"ነባሪ", lang_en:"እንግሊዝኛ", lang_am:"አማርኛ",
-    st_checking:"በመፈተሽ ላይ", st_online:"ይሰራል", st_offline:"ጠፍቷል", st_starting:"በመጀመር ላይ", st_building:"በመገንባት ላይ",
     u_m:"ሜ", u_km:"ኪሜ", u_min:"ደቂቃ", u_h:"ሰ", u_steps:"ደረጃዎች",
       t_calc:"መንገድ በማስላት ላይ…",
     t_noroute:"በነዚህ ቦታዎች መካከል መንገድ አልተገኘም።", t_routeready:"መንገድ ዝግጁ ነው · {km} ኪሜ", t_cleared:"መንገዱ ጸድቷል",
