@@ -8,8 +8,12 @@ extract, kept fresh automatically.
 
 > ⚠️ **Heads up:** this is a **vibe-coded, simplified setup** for basic local
 > use and experimentation — a friendly starting point, **not** a hardened
-> production deployment. Expect rough edges; pin versions, lock down secrets and
-> add real monitoring before relying on it.
+> production deployment. Expect rough edges and add real monitoring before
+> relying on it. In particular: the data pipeline mounts the **host Docker
+> socket**, which is root-equivalent access to the host — fine for a trusted
+> local box, not for shared hosts. The Nominatim DB password defaults to
+> `openkarta`; override it with `NOMINATIM_PASSWORD` (env var or an `.env`
+> file next to the compose file).
 
 Everything is fronted by a **single nginx gateway** on `:8000` — the app, the
 API docs at `/docs`, and a reverse proxy to every backend. The individual
@@ -108,14 +112,19 @@ docker compose logs -f data-pipeline   # follow the first build
 The build is **one-time and sequential**; later boots reuse the volumes.
 
 1. **Ingest** — `data-pipeline` downloads `ethiopia-latest.osm.pbf` from Geofabrik (conditional `curl -z`, so re-runs are free).
-2. **Planetiler** (~minutes) — builds `ethiopia-latest.mbtiles`, then writes the `.tiles_ready` sentinel → **Martin** starts serving.
-3. **OSRM** (~minutes) — extract → partition → customize (car/MLD), writes `.osrm_ready` → **OSRM** starts serving.
-4. **Nominatim** (slowest — tens of minutes) — imports the PBF into PostgreSQL.
-5. **Photon** — once Nominatim is up, imports an Ethiopia-only type-ahead index from it (~seconds), persisted in the `photon-index` volume.
+2. **Planetiler** (~minutes) — builds `ethiopia-latest.mbtiles` (in a temp file, swapped in atomically), then writes the `.tiles_ready` sentinel → **Martin** starts serving.
+3. **OSRM** (~minutes) — extract → partition → customize (car/MLD) in a scratch dir, swapped in and `.osrm_ready` written → **OSRM** starts serving.
+4. **Nominatim** (slowest — tens of minutes) — waits for the validated extract (`.pbf_ok`), imports it into PostgreSQL, then keeps itself fresh by applying Geofabrik's **daily diffs** in-container (`UPDATE_MODE=continuous`).
+5. **Photon** — once Nominatim is up, imports an Ethiopia-only type-ahead index from it (~seconds), persisted in the `photon-index` volume and rebuilt automatically when older than `PHOTON_REINDEX_DAYS`.
 
-The tile and routing servers **wait** on the sentinels instead of crash-looping, so an empty `./data` on first `up` is handled gracefully. Open <http://localhost:8000> any time — basemap tiles light up first, routing/search follow as their builds finish.
+The tile, routing and geocoding servers **wait** for their data (sentinels / the validated extract) instead of crash-looping, so an empty `./data` on first `up` is handled gracefully. Open <http://localhost:8000> any time — basemap tiles light up first, routing/search follow as their builds finish.
 
 ### 5. Verify each service
+
+`docker compose ps` mirrors these checks: every service except the batch
+`data-pipeline` has a **healthcheck** based on this smoke test, so engines show
+`(healthy)` once they actually answer — and stay `starting`/`unhealthy` while
+their first data build is still running.
 
 ```bash
 curl -s  http://localhost:8000/                  | head -c 80                     # app HTML
@@ -137,20 +146,28 @@ docker compose down -v                   # stop AND wipe volumes (next up re-imp
 docker volume rm open-karta_photon-index # rebuild only the Photon autocomplete index
 ```
 
-Data auto-refreshes every `INTERVAL` seconds (default `86400` = 24h).
+**Freshness:** tiles and the routing graph rebuild every `INTERVAL` seconds
+(default `86400` = 24h) and are **swapped in atomically** — the engines serve
+the old data until the new build is complete, and a failed build changes
+nothing. Nominatim applies Geofabrik's daily diffs on its own
+(`UPDATE_MODE=continuous`), and the pipeline rebuilds Photon's index from it
+whenever the index is older than `PHOTON_REINDEX_DAYS` (default `7`; `0`
+disables — expect a few seconds of search downtime during a reindex).
 
 ### 7. Troubleshooting
 
 | Symptom | Fix |
 |---|---|
 | `ok_photon` restart-loops / "max virtual memory areas too low" | Host `vm.max_map_count` too low — see step 2. |
+| `ok_photon` logs "photon-1.1.0.jar is missing" | The gitignored jar wasn't fetched — run the `curl` from step 2. |
 | Photon exits "import FAILED" | Nominatim isn't finished importing yet; Photon retries automatically. Watch `docker compose logs -f geocoder`. |
 | Map loads but **tiles are blank** | Ensure you're hitting the app at `:8000` (tiles are proxied same-origin & uncompressed via `/tiles/`). Direct `:3000` gzipped MVT can trip a MapLibre worker bug in some Chromium builds. |
 | `/route` returns `NoRoute` / errors | OSRM graph still building — wait for `.osrm_ready` (`docker compose logs -f routing-engine`). |
 | Search box empty / no suggestions | Photon index still building, or `:2322` unreachable — verify with the curl in step 5. |
 | Port `:8000` already in use | It's the only published port — stop the conflicting process or remap it in `docker-compose.yml`. |
 | A backend endpoint 404s right after editing `proxy/web.conf` | nginx single-file bind-mounts pin the inode; **recreate** (not just restart) the gateway: `docker compose up -d --force-recreate web-showcase`. |
-| Pipeline can't bind-mount `./data` | You didn't run `docker compose` from the project root — `$PWD` must resolve to it. |
+| A backend endpoint 502s after you **recreate** that backend | nginx resolves upstream container IPs at startup, and a recreate hands out a new IP (the pipeline's `docker restart`s keep it). Restart the gateway: `docker compose restart web-showcase`. |
+| `docker compose` errors `required variable PWD` | Run it from the project root — the pipeline bind-mounts `./data` by **host** path (`$PWD/data`), and compose now refuses to guess. |
 
 ## What the showcase does
 
@@ -214,15 +231,19 @@ These were required to make the stack actually run out of the box:
    duplicate-`*, *` value browsers reject). Nominatim imports the shared PBF via
    `PBF_PATH`; its PostgreSQL volume mounts at `/var/lib/postgresql` (version-agnostic).
 4. **Graceful empty state.** Martin and OSRM block on `.tiles_ready` /
-   `.osrm_ready` sentinels written by the pipeline, instead of restart-looping
-   on an empty `./data`.
+   `.osrm_ready` sentinels written by the pipeline, and Nominatim blocks on the
+   validated extract (`.pbf_ok`), instead of restart-looping on an empty
+   `./data`. Refreshes are built to the side and **swapped in atomically**, so
+   the engines serve consistent data right up to their restart.
 
 ## Layout
 
 ```
 .
 ├── docker-compose.yml          # orchestration (7 services, karta-network)
-├── pipeline/run.sh             # ingest → Planetiler → OSRM → hot reload
+├── pipeline/
+│   ├── Dockerfile              # pinned alpine + curl + docker-cli
+│   └── run.sh                  # ingest → Planetiler → OSRM → atomic swap → reload
 ├── photon/run.sh               # Photon: import index from Nominatim DB, then serve :2322
 ├── vroom/config.yml            # VROOM optimizer → OSRM driver (ok_routing_engine:5000)
 ├── proxy/
@@ -246,13 +267,24 @@ These were required to make the stack actually run out of the box:
 - **Photon (autocomplete):** on first start it builds an embedded-OpenSearch
   index from the Nominatim DB for Ethiopia only (`-country-codes et`,
   `-languages en,am`) — ~50k docs in seconds — persisted in the `photon-index`
-  volume. Heap via `JAVA_TOOL_OPTIONS=-Xmx4g`; needs host `vm.max_map_count ≥ 262144`.
-  Re-run the import by removing the volume: `docker compose down && docker volume rm open-karta_photon-index`.
+  volume. The pipeline rebuilds it automatically when older than
+  `PHOTON_REINDEX_DAYS` (default `7` days); force it immediately by removing
+  the volume: `docker compose down && docker volume rm open-karta_photon-index`.
+  Heap via `JAVA_TOOL_OPTIONS=-Xmx4g`; needs host `vm.max_map_count ≥ 262144`.
   The Photon jar is gitignored (96 MB); on a fresh clone fetch it once before `up`:
   `curl -L -o photon/photon-1.1.0.jar https://github.com/komoot/photon/releases/download/1.1.0/photon-1.1.0.jar`
-- **Refresh cadence:** `INTERVAL` (default `86400`s). Re-downloads are
+- **Refresh cadence:** `INTERVAL` (default `86400`s) for tiles + routing
+  (atomic swaps); Nominatim replicates Geofabrik's daily diffs continuously;
+  Photon reindexes per `PHOTON_REINDEX_DAYS`. Re-downloads are
   time-conditional (`curl -z`), so unchanged upstream data costs no bandwidth.
 - **Reset everything:** `docker compose down -v` (the `-v` also drops the
   Nominatim DB volume; the next `up` re-imports).
-- **Production:** consider pinning `osrm/osrm-backend` and `planetiler` to fixed
-  versions (currently `:latest` per the brief) for reproducible builds.
+- **Versions:** every image is pinned (Planetiler `0.8.2`, OSRM `v5.25.0`,
+  Martin `v0.14.2`, VROOM `v1.14.0`, Nominatim `4.5`, nginx `1.27-alpine`,
+  alpine `3.21`) for reproducible builds — bump them deliberately. OSRM's
+  Docker Hub tags stop at `v5.25.0` (no image was published for newer
+  releases). The pipeline's `OSRM_IMAGE` and the `routing-engine` image must
+  move in **lockstep**: the graph format is version-specific.
+- **Esri imagery terms:** the Satellite basemap hot-links Esri World Imagery
+  tiles (the only off-host asset). Review Esri's terms of use before any
+  public-facing deployment.

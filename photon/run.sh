@@ -5,12 +5,25 @@
 #  embedded-OpenSearch index from the Nominatim PostgreSQL DB (Ethiopia only)
 #  and serves /api on :2322 with CORS enabled. The index persists in the
 #  `photon-index` named volume (mounted at /photon); a partial/empty import is
-#  never marked ready, so it retries until real data is available.
+#  never marked ready, so it retries until real data is available. The data
+#  pipeline triggers a periodic reimport (PHOTON_REINDEX_DAYS) by removing
+#  /photon/.ready and restarting this container.
 # ==========================================================================
 set -u
 
 JAR=/opt/photon/photon-1.1.0.jar
 cd /photon                                   # photon_data/ index is created here
+
+# The jar is gitignored (96 MB) — fail fast with a useful message instead of
+# sitting out the Nominatim import and then dying with a misleading import
+# error.
+if [ ! -f "$JAR" ]; then
+  echo "[photon] ERROR: ${JAR} is missing."
+  echo "[photon] Fetch it once on the host (see README 'One-time host prep'):"
+  echo "[photon]   curl -L -o photon/photon-1.1.0.jar https://github.com/komoot/photon/releases/download/1.1.0/photon-1.1.0.jar"
+  sleep 60
+  exit 1
+fi
 
 NOMINATIM_HOST="${NOMINATIM_HOST:-ok_geocoder}"
 NOMINATIM_PASSWORD="${NOMINATIM_PASSWORD:?NOMINATIM_PASSWORD must be set}"
@@ -27,6 +40,10 @@ if [ ! -f /photon/.ready ]; then
     sleep 20
   done
   echo "[photon] Nominatim ready — importing Ethiopia index from ${NOMINATIM_HOST}:5432 ..."
+
+  # Photon won't import over an existing index; this also drops the stale
+  # index on a pipeline-triggered reindex (brief search outage by design).
+  rm -rf /photon/photon_data
 
   if java -jar "$JAR" -nominatim-import \
         -host "$NOMINATIM_HOST" -port 5432 \

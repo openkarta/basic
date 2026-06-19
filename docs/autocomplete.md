@@ -62,7 +62,9 @@ curl -s "http://localhost:8000/photon/reverse?lon=38.7469&lat=9.0307&lang=en"
 
 Readiness of the search node and the index import date.
 
-**Use case:** a readiness probe — the app waits for this before enabling search.
+**Use case:** a readiness probe — e.g. gate your own UI's search box until this
+returns `Ok`. (The showcase app doesn't gate on it; it simply surfaces search
+errors as they happen.)
 
 ```bash
 curl -s "http://localhost:8000/photon/status"

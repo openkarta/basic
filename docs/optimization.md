@@ -82,8 +82,10 @@ curl -s -o /dev/null -w '%{http_code}\n' "http://localhost:8000/vroom/health"
 ```
 
 > `POST /vroom` (no trailing slash) `308`-redirects to `/vroom/`, preserving the
-> method and body. VROOM needs OSRM's `table` service to be up; on first boot it
-> won't solve until the routing graph is ready.
+> method and body. The gateway answers the CORS `OPTIONS` preflight for
+> `/vroom/`, so cross-origin browser calls work too. VROOM needs OSRM's `table`
+> service to be up; on first boot it won't solve until the routing graph is
+> ready.
 
 ---
 

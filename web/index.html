@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Open Karta · Ethiopia Geospatial Stack</title>
 <link rel="icon" type="image/svg+xml" href="logos/openkarta-dark-optimized.svg" />
 
@@ -368,13 +368,14 @@ const I18N = {
     t_nomatch:"No match found in Ethiopia — try another term", t_basemap:"Basemap · {x}", t_labels:"Labels · {x}",
     t_searcherr:"Search unavailable — Photon still building? ({e})", t_routeerr:"Routing unreachable — finished building yet? ({e})",
       my_location:"My location", get_directions:"Get directions",
-     swap:"Reverse the route",
+     swap:"Reverse the route", clear:"Clear the route",
     trip_hint:"Search, click the map, or use your location for each stop. Drag a pin to adjust.",
     t_setfrom:"Start set — now choose a destination", t_setto:"Destination set", t_armfrom:"Now search or click the map to set your start",
     t_armto:"Now search or click the map to set your destination", t_locating:"Finding your location…",
     t_locerr:"Couldn't get your location — allow access or pick it on the map", t_swapped:"Route reversed",
     add_stop:"Add stop", stop_label:"Stop", remove_stop:"Remove stop", search_ph_field:"Search a place…",
     t_setstop:"Stop set", t_armstop:"Now search or click the map to set this stop", t_maxstops:"Maximum stops reached",
+    t_allset:"All stops are set — select a stop to change it, or Clear to start over",
     api_docs:"API docs & endpoints"
   },
   am: {
@@ -388,13 +389,14 @@ const I18N = {
     t_nomatch:"አልተገኘም — በሌላ ቃል ይሞክሩ", t_basemap:"የካርታ ዓይነት · {x}", t_labels:"ስያሜዎች · {x}",
     t_searcherr:"ፍለጋ አልተሳካም — Photon እየተገነባ ይሆን? ({e})", t_routeerr:"የመንገድ አገልግሎት አልተገኘም — ግንባታው አልቋል? ({e})",
       my_location:"የእኔ አካባቢ", get_directions:"አቅጣጫ ያግኙ",
-     swap:"መንገዱን ይገልብጡ",
+     swap:"መንገዱን ይገልብጡ", clear:"መንገዱን ያጽዱ",
     trip_hint:"ለእያንዳንዱ ማረፊያ ይፈልጉ፣ ካርታውን ይጫኑ ወይም አካባቢዎን ይጠቀሙ። ለማስተካከል ምልክቱን ይጎትቱ።",
     t_setfrom:"መነሻ ተዘጋጅቷል — አሁን መድረሻ ይምረጡ", t_setto:"መድረሻ ተዘጋጅቷል", t_armfrom:"መነሻዎን ለማበጀት ይፈልጉ ወይም ካርታውን ይጫኑ",
     t_armto:"መድረሻዎን ለማበጀት ይፈልጉ ወይም ካርታውን ይጫኑ", t_locating:"አካባቢዎን በማግኘት ላይ…",
     t_locerr:"አካባቢዎን ማግኘት አልተቻለም — ፈቃድ ይስጡ ወይም በካርታው ይምረጡ", t_swapped:"መንገዱ ተገልብጧል",
     add_stop:"ማረፊያ ይጨምሩ", stop_label:"ማረፊያ", remove_stop:"ማረፊያ ያስወግዱ", search_ph_field:"ቦታ ይፈልጉ…",
     t_setstop:"ማረፊያ ተዘጋጅቷል", t_armstop:"ይህን ማረፊያ ለማበጀት ይፈልጉ ወይም ካርታውን ይጫኑ", t_maxstops:"ከዚህ በላይ ማረፊያ ማከል አይቻልም",
+    t_allset:"ሁሉም ማረፊያዎች ተሞልተዋል — ለመቀየር ማረፊያውን ይምረጡ ወይም ያጽዱ",
     api_docs:"የኤፒአይ ሰነድ"
   }
 };
@@ -405,7 +407,10 @@ function applyUILang() {
   const L = uiLang();
   document.documentElement.lang = L;
   document.querySelectorAll("[data-i18n]").forEach(el => { const v = I18N[L][el.dataset.i18n]; if (v != null) el.textContent = v; });
-  document.querySelectorAll("[data-i18n-html]").forEach(el => { const v = I18N[L][el.dataset.i18nHtml]; if (v != null) el.innerHTML = v; });
+  // Icon-only buttons carry no text node — translate their accessible names.
+  [["swap", "swap"], ["clear", "clear"]].forEach(([id, key]) => {
+    const b = $(id); if (b) { b.setAttribute("aria-label", tr(key)); b.title = tr(key); }
+  });
   if (typeof updateTripUI === "function") updateTripUI();   // re-translate stop labels + placeholders
   if (lastRoute) { renderMetrics(lastRoute); renderSteps(lastRoute); }   // re-translate active directions
 }
@@ -415,8 +420,8 @@ function applyUILang() {
    Satellite-Hybrid is built from Bright (same roads/labels) over ESRI World
    Imagery, so the two basemaps share styling, glyphs and sprite. */
 const BASEMAPS = [
-  { id: "street",    label: "Street",    style: "styles/Bright.json" },
-  { id: "satellite", label: "Satellite", style: "styles/Satellite-Hybrid.json" }
+  { id: "street",    style: "styles/Bright.json" },            // labels come from tr("base_"+id)
+  { id: "satellite", style: "styles/Satellite-Hybrid.json" }
 ];
 let activeBasemap = BASEMAPS.find(b => b.id === URLP.get("base")) || BASEMAPS[0];
 let activeLang = ["en", "am", "default"].includes(URLP.get("lang")) ? URLP.get("lang") : "default";   // used by i18n + geocoder (declared early to avoid TDZ)
@@ -507,11 +512,7 @@ function setBasemap(bm) {
 /* ---------------------------- label language ---------------------------- */
 /* Switches map labels between the style default (bilingual), English and
    Amharic, using the name:* fields in the OpenMapTiles vector tiles. */
-const LANGS = [
-  { id: "default", label: "Default" },
-  { id: "en",      label: "English" },
-  { id: "am",      label: "Amharic" }
-];
+const LANGS = [{ id: "default" }, { id: "en" }, { id: "am" }];   // labels come from LANG_NATIVE
 const LANG_EXPR = {
   en: ["coalesce", ["get", "name:en"], ["get", "name:latin"], ["get", "name"]],
   am: ["coalesce", ["get", "name:am"], ["get", "name"]]
@@ -549,6 +550,7 @@ let armed = null;                      // numeric stop index (or null) — next 
 const MAX_STOPS = 8;
 let currentRoute = null;               // active route geometry (re-added across basemap switches)
 let lastRoute = null;                  // last OSRM route object (re-rendered when language changes)
+let routeSeq = 0;                      // bumped per request & on clear — stale OSRM responses are dropped
 const filledStops = () => stops.filter(Boolean);
 const canRoute = () => stops.length >= 2 && stops.every(Boolean);
 
@@ -824,6 +826,7 @@ $("trip").addEventListener("click", (e) => {       // remove a waypoint
 });
 
 function clearRouteLine() {
+  routeSeq++;                          // invalidate any in-flight fetchRoute — it can't resurrect a cleared route
   currentRoute = null; lastRoute = null;
   if (map.getLayer("route-line")) map.removeLayer("route-line");
   if (map.getLayer("route-glow")) map.removeLayer("route-glow");
@@ -878,21 +881,23 @@ $("stepsToggle").addEventListener("click", () => {
 
 map.on("click", (e) => {
   closeAllAC();
-  const stop = { lng: e.lngLat.lng, lat: e.lngLat.lat, label: fmtCoord(e.lngLat.lng, e.lngLat.lat) };
-  let i = (armed != null) ? armed : stops.findIndex(s => !s);
-  if (i === -1) { resetTrip(); i = 0; }   // all slots full -> start a fresh trip
-  setStop(i, stop);
+  const i = (armed != null) ? armed : stops.findIndex(s => !s);
+  if (i === -1) { toast(tr("t_allset")); return; }   // full trip: never wipe it on a stray click
+  setStop(i, { lng: e.lngLat.lng, lat: e.lngLat.lat, label: fmtCoord(e.lngLat.lng, e.lngLat.lat) });
 });
 
 async function fetchRoute(fit = true) {
   if (!canRoute()) return;
+  const seq = ++routeSeq;     // rapid re-routes (drag, click) can resolve out of order — only the latest may render
   toast(tr("t_calc"));
   try {
     const coordStr = stops.map(s => `${s.lng},${s.lat}`).join(";");
     const url = `${OSRM}/route/v1/driving/${coordStr}?overview=full&geometries=geojson&steps=true`;
     const res = await fetch(url);
+    if (seq !== routeSeq) return;                     // superseded while in flight
     if (!res.ok) throw new Error("HTTP " + res.status);
     const data = await res.json();
+    if (seq !== routeSeq) return;
     if (data.code !== "Ok" || !data.routes || !data.routes.length) { toast(tr("t_noroute"), "err"); return; }
     const route = data.routes[0];
     currentRoute = route.geometry;
@@ -908,6 +913,7 @@ async function fetchRoute(fit = true) {
     }
     toast(fmt("t_routeready", { km: (route.distance / 1000).toFixed(1) }), "ok");
   } catch (err) {
+    if (seq !== routeSeq) return;                     // stale failure: a newer request owns the UI
     toast(fmt("t_routeerr", { e: err.message }), "err");
   }
 }
@@ -918,7 +924,8 @@ function initFromURL() {
   if (!route) return;
   const segs = route.split(";").map(s => s.split(",").map(Number)).filter(s => s.length === 2 && s.every(isFinite));
   if (segs.length < 2) return;
-  stops = segs.map(([lng, lat]) => ({ lng, lat, label: fmtCoord(lng, lat) }));
+  // Cap at MAX_STOPS — the UI can't add more, so a crafted URL shouldn't either.
+  stops = segs.slice(0, MAX_STOPS).map(([lng, lat]) => ({ lng, lat, label: fmtCoord(lng, lat) }));
   markers = stops.map(() => null);
   rebuildMarkers(); renderTrip(); updateButtons();
   fetchRoute(!HAD_HASH);   // keep a pinned camera; otherwise frame the route

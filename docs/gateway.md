@@ -12,6 +12,7 @@ are served by the same gateway at `/docs`).
 |---|---|---|
 | `/` | static files (`index.html`, `styles/`, `vendor/`, `fonts/`, …) | — |
 | `/tiles/{z}/{x}/{y}` | `ok_tile_server:3000/ethiopia-latest/{z}/{x}/{y}` | Martin |
+| `/martin/…` | `ok_tile_server:3000/…` | Martin (full API: `/catalog`, TileJSON, `/health`) |
 | `/osrm/…` | `ok_routing_engine:5000/…` | OSRM |
 | `/photon/…` | `ok_photon:2322/…` | Photon |
 | `/nominatim/…` | `ok_geocoder:8080/…` | Nominatim |
@@ -22,7 +23,9 @@ are served by the same gateway at `/docs`).
 - **One origin, zero CORS friction.** The app makes only same-origin requests.
   Each proxied location still strips any upstream `Access-Control-Allow-Origin`
   and adds a single `*`, so the endpoints stay usable from other origins without
-  duplicate-header errors.
+  duplicate-header errors. The gateway also answers the `OPTIONS` preflight for
+  `/vroom/` (cross-origin JSON `POST`s are preflighted; the `GET` endpoints are
+  CORS *simple requests* and aren't).
 - **Uncompressed tiles.** Martin serves gzip-encoded MVT, which MapLibre's web
   worker mishandles in some Chromium builds (blank map). The `/tiles/` location
   strips `Accept-Encoding` upstream so Martin returns identity (plain PBF).
@@ -35,4 +38,4 @@ are served by the same gateway at `/docs`).
 - A backend that is still building (first boot) returns `502`/`503` through the
   proxy until its data is ready — the app surfaces this as a friendly message.
 - The proxy uses fixed container names (`ok_tile_server`, `ok_routing_engine`,
-  `ok_photon`, `ok_geocoder`) resolved by Docker's embedded DNS.
+  `ok_photon`, `ok_geocoder`, `ok_vroom`) resolved by Docker's embedded DNS.
