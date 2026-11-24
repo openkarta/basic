@@ -34,8 +34,9 @@ In priority order:
 
 Sources 2 and 3 are read live from the stack's own Photon, so they follow the
 OSM data with no extra build step. After a route is computed the app asks
-Photon what is named along it — one lookup roughly every 600 m (at most ~30 per
-route, wider and sparser on long intercity routes):
+Photon what is named along it — one lookup per language (`en`, `am`) roughly
+every 600 m (at most ~30 points per route, wider and sparser on long intercity
+routes):
 
 ```bash
 curl -s "http://localhost:8000/photon/reverse?lon=38.7331&lat=9.0200&radius=0.6&limit=50&lang=en\
@@ -55,7 +56,8 @@ A feature names an intersection when it lies within its reach of it:
 | `highway=bus_stop` | 70 m | turning and arrival only (too many to list in passing) |
 
 Names are tidied on the way in: `Tor Hailoch (Mini Bus Station)` → **Tor
-Hailoch**; taxi-line descriptions such as `Piassa to Megenagna` are ignored;
+Hailoch**, `ዘነበወርቅ ታክሲ ተራ` → **ዘነበወርቅ**; taxi-line descriptions such as
+`Piassa to Megenagna` are ignored;
 bilingual names (`ጎማ ተራ / Goma Tera`) show the half matching the UI language;
 and spelling variants of one place (`Zenebework` / `Zenbwork`, `Abnet Square` /
 `Abinet`) are treated as the same junction.
@@ -138,6 +140,9 @@ map labels and every other OSM user after the next data refresh.
   ("Turn left · 160 m"); OSRM's fastest path sometimes prefers such streets.
 - **Long routes.** The lookups are capped, so intercity routes name towns and
   major junctions rather than every neighbourhood.
-- **Language.** A name is shown in the UI language only where OSM has
-  `name:en` / `name:am` for it; roundabout names from the routing graph are in
-  OSM's default `name`.
+- **Language.** A name is shown in the UI language where OSM has `name:en` /
+  `name:am` for it. Where it does not, the name is borrowed from a neighbour
+  named after the same place (the taxi stand `Tor Hailoch` reads **ጦር ሃይሎች**
+  because the suburb beside it carries both spellings). Roundabout names taken
+  from the routing graph (`Tewodros Square`) only exist in OSM's default
+  `name` — add `name:am` in `web/junctions.geojson` or in OSM to localise them.

@@ -678,24 +678,27 @@ function renderStreetSteps(route) {
 let navMode = URLP.get("dir") === "streets" ? "streets" : "junctions";
 let customJunctions = null;            // parsed web/junctions.geojson (null until loaded / when absent)
 
-// Names along the route for one UI language, cached on the route object. Curated
-// names are available at once; Photon's arrive a moment later (ready flips true).
-function junctionNames(route, lang) {
-  const cache = route._names || (route._names = {});
-  if (cache[lang]) return cache[lang];
-  const st = cache[lang] = { entries: OKJunctions.fromCustom(customJunctions, lang), ready: false };
+// What is named along the route, cached on the route object. Photon is asked in
+// BOTH languages: a stand sign-posted in one script can then borrow the other
+// from the place it is named after, and switching language needs no refetch.
+function junctionNames(route) {
+  if (route._names) return route._names;
+  const st = route._names = { en: [], am: [], ready: false };
   const { points, radiusKm } = OKJunctions.corridor(route);
   const tags = OKJunctions.PHOTON_TAGS.map(t => "&osm_tag=" + encodeURIComponent(t)).join("");
-  st.promise = Promise.all(points.map(p =>
+  st.promise = Promise.all(points.flatMap(p => ["en", "am"].map(lang =>
     fetch(`${PHOTON}/reverse?lon=${p[0].toFixed(5)}&lat=${p[1].toFixed(5)}&radius=${radiusKm}&limit=50&lang=${lang}${tags}`)
       .then(res => { if (!res.ok) throw new Error("HTTP " + res.status); return res.json(); })
-      .then(d => d.features || [])
-      .catch(err => { console.warn("[junctions]", err.message); return []; })   // one failed disc just leaves a gap
-  )).then(lists => {
-    st.entries = st.entries.concat(OKJunctions.fromPhoton(lists.flat(), lang));
-    st.ready = true;
-  });
+      .then(d => { st[lang].push(...(d.features || [])); })
+      .catch(err => console.warn("[junctions]", err.message))   // one failed disc just leaves a gap
+  ))).then(() => { st.ready = true; });
   return st;
+}
+// Curated names (available at once, always win) + Photon's (a moment later).
+function junctionEntries(route, lang) {
+  const st = junctionNames(route);
+  return OKJunctions.fromCustom(customJunctions, lang)
+    .concat(OKJunctions.fromPhoton(st[lang], lang, st[lang === "am" ? "en" : "am"]));
 }
 const ordinalEn = (n) => n + (n % 100 >= 11 && n % 100 <= 13 ? "th" : ["th", "st", "nd", "rd"][n % 10] || "th");
 function junctionLabel(j) {            // the tooltip says where the name came from — handy when curating
@@ -738,8 +741,8 @@ function junctionText(row) {
   return text;
 }
 function renderJunctionSteps(route) {
-  const lang = uiLang(), names = junctionNames(route, lang);
-  const rows = OKJunctions.itinerary(route, names.entries, lang);
+  const lang = uiLang(), names = junctionNames(route);
+  const rows = OKJunctions.itinerary(route, junctionEntries(route, lang), lang);
   $("steps").innerHTML = rows.map(r => {
     const m = r.maneuver || {};
     const cls = r.type === "maneuver" ? "" : r.type;
@@ -751,7 +754,7 @@ function renderJunctionSteps(route) {
   setJunctionPoints(rows.filter(r => r.junction && r.type !== "arrive"));
   // Photon's names land after the first paint — redraw once, unless the user moved on.
   if (!names.ready) names.promise.then(() => {
-    if (lastRoute === route && navMode === "junctions" && uiLang() === lang) renderJunctionSteps(route);
+    if (lastRoute === route && navMode === "junctions") renderJunctionSteps(route);
   });
 }
 function renderSteps(route) {
@@ -772,7 +775,7 @@ $("navMode").addEventListener("click", (e) => {
 fetch("junctions.geojson").then(r => (r.ok ? r.json() : null)).then(g => {
   if (!g || !Array.isArray(g.features) || !g.features.length) return;
   customJunctions = g;
-  if (lastRoute) { delete lastRoute._names; renderSteps(lastRoute); }   // a route beat the file — re-name it
+  if (lastRoute) renderSteps(lastRoute);   // a route beat the file — re-name it
 }).catch(err => console.warn("[junctions] junctions.geojson:", err.message));
 
 /* Named junctions of the active route, drawn over the route line. */

@@ -75,10 +75,13 @@
     if (kind === "transit" || kind === "stop") {
       // "Piassa to Megenagna", "Bole and 4 kilo" describe taxi lines, not places.
       if (/(^|\s)(to|and|ወደ|እና)(\s|$)/i.test(n) || /[,&\/→↔]|\s-\s/.test(n)) return "";
-      n = n.replace(/\s+(mini\s?bus|bus|taxi)\s+(station|stop|stand|terminal|rank)$/i, "").trim();
+      // "Zenbwork taxi terminal" / "ዘነበወርቅ ታክሲ ተራ" -> the place the stand is named after.
+      // (A bare "ተራ" stays: it is part of market names such as "ጭድ ተራ".)
+      n = n.replace(/(^|\s+)(long[- ]distance\s+)?(mini\s?bus|bus|taxi)\s+(station|stop|stand|terminal|rank)$/i, "")
+           .replace(/(^|\s+)(አገር አቋራጭ\s+)?(ታክሲ|አውቶብስ|አውቶቡስ|ሚኒባስ)\s+(ተራ|ማቆሚያ|መቆሚያ|ጣቢያ)$/, "").trim();
     }
     n = n.replace(/\s+(አካባቢ|area)$/i, "").trim();                    // "ፒያሳ አካባቢ" = "Piassa area"
-    return n.length < 2 || /^\d+$/.test(n) ? "" : n;
+    return n.length < 2 || /^\d+$/.test(n) ? "" : n;                 // (a bare "taxi stop" is empty by now)
   }
   // Spelling-tolerant identity. Amharic names are romanised many ways ("Zenebework" /
   // "Zenbwork", "Ayer Tena" / "Ayertena", "Abnet Square" / "Abinet") — so two names are
@@ -98,19 +101,37 @@
              r: radius > 0 ? radius : KINDS[kind].r, src };
   }
 
-  /* Photon features -> entries. Photon already localises `name` to the `lang`
-     it was asked for (name:en / name:am), so one fetch per UI language. */
-  function fromPhoton(features, lang) {
-    const out = [], seen = new Set();
+  /* Photon features -> entries. Photon localises `name` to the `lang` it was asked
+     for (name:en / name:am) — but many features carry one script only. Pass the
+     same features as fetched in the OTHER language (`others`) and such a name
+     borrows the right script from a neighbour named after the same place: the
+     taxi stand "Tor Hailoch" reads "ጦር ሃይሎች" in Amharic because the suburb
+     beside it carries both spellings. */
+  function fromPhoton(features, lang, others) {
+    const script = lang === "am" ? ETHIOPIC : LATIN, otherLang = lang === "am" ? "en" : "am";
+    const idOf = (p) => p.osm_type + "" + p.osm_id;
+    const otherName = new Map();
+    for (const f of others || []) { const p = f.properties || {}; if (p.name) otherName.set(idOf(p), p.name); }
+
+    const out = [], seen = new Set(), alias = new Map();        // alias: other-language key -> name in `lang`
     for (const f of features || []) {
       const p = f.properties || {}, g = f.geometry || {};
       if (g.type !== "Point" || !g.coordinates) continue;
-      const id = p.osm_type + "" + p.osm_id;
+      const id = idOf(p), kind = kindOf(p.osm_key, p.osm_value);
       if (seen.has(id)) continue;
       seen.add(id);
-      const e = entry(g.coordinates[0], g.coordinates[1], p.name, kindOf(p.osm_key, p.osm_value), lang,
-                      "OSM " + p.osm_key + "=" + p.osm_value);
-      if (e) out.push(e);
+      const e = entry(g.coordinates[0], g.coordinates[1], p.name, kind, lang, "OSM " + p.osm_key + "=" + p.osm_value);
+      if (!e) continue;
+      out.push(e);
+      const twin = script.test(e.name) && otherName.has(id) ? cleanName(otherName.get(id), kind, otherLang) : "";
+      if (twin && !script.test(twin)) {
+        const k = keyOf(twin), had = alias.get(k);
+        if (!had || KINDS[kind].q < had.q) alias.set(k, { name: e.name, q: KINDS[kind].q });
+      }
+    }
+    for (const e of out) {
+      const a = !script.test(e.name) && alias.get(e.key);
+      if (a) { e.name = a.name; e.key = keyOf(a.name); }
     }
     return out;
   }
