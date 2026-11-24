@@ -92,6 +92,28 @@ TomTom likewise classes every roundabout exit as straight / left / right / back.
 
 ---
 
+## Changing the wording
+
+Every junction sentence is a plain template in `JTXT` (`web/index.html`), one
+block per language, so wording can be corrected by ear without touching logic:
+
+```js
+am: {
+  at:        "{at} ሲደርሱ {act}",                    // ሜክሲኮ ሲደርሱ ወደ ግራ ይታጠፉ
+  turn_to:   { left: "ወደ ግራ ታጥፈው ወደ {to} ይሂዱ", … },
+  ring_name: "{at} አደባባይ",                         // ጦር ሃይሎች -> ጦር ሃይሎች አደባባይ
+  pass:      "በ{at} በኩል ይለፉ",
+  …
+}
+```
+
+`{at}` is the junction, `{to}` the next named junction, `{act}` what to do
+there. Amharic uses the everyday words — **አደባባይ** for a roundabout,
+**መገንጠያ** for a junction or fork — and its own sentence order rather than a
+word-for-word rendering of the English.
+
+---
+
 ## Naming junctions yourself
 
 `web/junctions.geojson` is a plain GeoJSON `FeatureCollection` of points. Add

@@ -405,7 +405,7 @@ const I18N = {
   am: {
     tagline:"ኢትዮጵያ · በራስ የተስተናገደ የካርታ መድረክ",
     planroute:"መንገድ ያቅዱ",  directions:"አቅጣጫዎች", origin:"መነሻ", dest:"መድረሻ",
-    nav_junctions:"መገናኛዎች", nav_streets:"ጎዳናዎች", nav_style:"የአቅጣጫ አቀራረብ", junction:"መገናኛ",
+    nav_junctions:"መገንጠያዎች", nav_streets:"ጎዳናዎች", nav_style:"የአቅጣጫ አቀራረብ", junction:"መገንጠያ",
     distance:"ርቀት", drivetime:"የጉዞ ጊዜ",
     base_street:"ጎዳና", base_satellite:"ሳተላይት", lang_default:"ነባሪ", lang_en:"እንግሊዝኛ", lang_am:"አማርኛ",
     u_m:"ሜ", u_km:"ኪሜ", u_min:"ደቂቃ", u_h:"ሰ", u_steps:"ደረጃዎች",
@@ -613,27 +613,32 @@ function maneuverIcon(m) {
 }
 const MOD_EN = { "slight left":"slight left", "slight right":"slight right", "sharp left":"sharp left",
                  "sharp right":"sharp right", "left":"left", "right":"right", "straight":"straight" };
-const MOD_AM = { "slight left":"ትንሽ ወደ ግራ", "slight right":"ትንሽ ወደ ቀኝ", "sharp left":"በደንብ ወደ ግራ",
-                 "sharp right":"በደንብ ወደ ቀኝ", "left":"ግራ", "right":"ቀኝ", "straight":"ቀጥታ" };
+// Amharic modifiers are whole phrases ("ወደ ግራ"), so a sentence is "<modifier> ይታጠፉ".
+const MOD_AM = { "slight left":"በትንሹ ወደ ግራ", "slight right":"በትንሹ ወደ ቀኝ", "sharp left":"በደንብ ወደ ግራ",
+                 "sharp right":"በደንብ ወደ ቀኝ", "left":"ወደ ግራ", "right":"ወደ ቀኝ", "straight":"ቀጥታ" };
 function maneuverText(m, name) {
   const mod = m.modifier || "";
   const nm  = name ? `<b>${esc(name)}</b>` : "";
   if (uiLang() === "am") {
-    const md = MOD_AM[mod] || mod, onto = name ? `፣ ${nm}` : "";
+    // Everyday terms, checked by back-translation: አደባባይ = roundabout, መገንጠያ =
+    // junction / fork. (A literal "ዙሪያ መንገድ" reads as "the road around".)
+    const md = MOD_AM[mod] || "", onto = name ? `፣ ${nm}` : "", uturn = mod.indexOf("uturn") >= 0;
+    const side = md && mod !== "straight";                       // an actual left / right
+    const turn = uturn ? "ዞረው ይመለሱ" : side ? `${md} ይታጠፉ` : "ቀጥ ብለው ይቀጥሉ";
     switch (m.type) {
       case "depart":       return "ጉዞ ይጀምሩ";
       case "arrive":       return "መድረሻዎ ደርሰዋል";
       case "turn":
-      case "end of road":  return (mod.indexOf("uturn") >= 0 ? "ወደ ኋላ ይመለሱ" : `ወደ ${md} ይታጠፉ`) + onto;
-      case "continue":     return (mod.indexOf("uturn") >= 0 ? "ወደ ኋላ ይመለሱ" : mod && mod !== "straight" ? `ወደ ${md} ይቀጥሉ` : "ቀጥ ብለው ይቀጥሉ") + onto;
+      case "end of road":  return turn + onto;
+      case "continue":     return (uturn ? "ዞረው ይመለሱ" : side ? `${md} ይቀጥሉ` : "ቀጥ ብለው ይቀጥሉ") + onto;
       case "new name":     return "ይቀጥሉ" + onto;
-      case "merge":        return "ይቀላቀሉ" + onto;
-      case "on ramp":      return "መግቢያውን ይውሰዱ" + onto;
-      case "off ramp":     return "መውጫውን ይውሰዱ" + onto;
-      case "fork":         return `በመንታ መንገዱ ${md} ይያዙ`;
+      case "merge":        return "ወደ መንገዱ ይቀላቀሉ" + onto;
+      case "on ramp":      return "በመግቢያው ይግቡ" + onto;
+      case "off ramp":     return "በመውጫው ይውጡ" + onto;
+      case "fork":         return `መገንጠያው ላይ ${md || "ቀጥታ"} ይሂዱ`;
       case "roundabout":
-      case "rotary":       return "ወደ ዙሪያ መንገዱ ይግቡ" + (m.exit ? `፣ ${m.exit}ኛ መውጫ` : "") + onto;
-      case "roundabout turn": return `በዙሪያ መንገዱ ወደ ${md} ይታጠፉ` + onto;
+      case "rotary":       return (m.exit ? `አደባባዩ ላይ በ${m.exit}ኛው መውጫ ይውጡ` : "ወደ አደባባዩ ይግቡ") + onto;
+      case "roundabout turn": return `አደባባዩ ላይ ${turn}` + onto;
       default:             return "ይቀጥሉ" + onto;
     }
   }
@@ -705,40 +710,68 @@ function junctionLabel(j) {            // the tooltip says where the name came f
   return `<b title="${esc(j.src + (j.d ? " · " + j.d + " m" : ""))}">${esc(j.name)}</b>` +
          (j.alt ? ` <span class="aka">(${esc(j.alt)})</span>` : "");
 }
-/* Roundabouts are told by the way you leave them — left, right or straight, as
-   at any crossroads — not by counting exits (row.turn, from junctions.js). The
-   exit number only comes back, in brackets, when an earlier exit points the same
-   way and the word alone would send the driver out too soon. */
-const RING_EN = { straight:"go straight", left:"turn left", right:"turn right", back:"go around and head back" };
-const RING_AM = { straight:"ቀጥ ብለው ይለፉ", left:"ወደ ግራ ይታጠፉ", right:"ወደ ቀኝ ይታጠፉ", back:"ዞረው ይመለሱ" };
-function ringText(row, am) {
-  const t = row.turn, n = row.maneuver.exit;
-  if (!t) return n ? (am ? `${n}ኛውን መውጫ ይውሰዱ` : `take the ${ordinalEn(n)} exit`) : (am ? "ይቀጥሉ" : "continue");
-  if (t.unclear && t.dir === "straight") {            // two exits lead ahead — ours is the far one
-    const far = t.side === "right" ? "left" : "right";
-    return am ? (far === "left" ? "ግራውን ይያዙ" : "ቀኙን ይያዙ") : `keep ${far}`;
+/* Wording of junction directions: whole sentences with {placeholders}, so they
+   can be corrected by ear without touching the logic.
+     {at} this junction · {to} the next named junction · {act} what to do there
+     {text} the sentence so far · {nth} the exit number ("2nd" / "2ኛ")
+   Roundabouts are told by the way you leave them — left, right or straight, as
+   at any crossroads — not by counting exits (row.turn, from junctions.js); the
+   exit number only returns, in brackets, when an earlier exit points the same way.
+   Amharic follows how directions are actually given ("ሜክሲኮ ሲደርሱ ወደ ግራ ታጥፈው
+   ወደ ፒያሳ ይሂዱ") rather than English word order, with the everyday words:
+   አደባባይ for a roundabout, መገንጠያ for a junction. Every line was back-translated. */
+const JTXT = {
+  en: {
+    depart: "Head out", depart_to: "Head toward {to}",
+    pass: "Continue through {at}",
+    arrive: "Arrive at your destination", arrive_near: "Arrive at your destination, near {at}",
+    at: "At {at}, {act}", then_to: "{text} toward {to}",
+    ring: "At the roundabout, {act}", ring_at: "At {at}, {act}",
+    ring_act: { straight: "go straight", left: "turn left", right: "turn right", back: "go around and head back" },
+    ring_keep: { left: "keep left", right: "keep right" },
+    ring_nth: "{act} ({nth} exit)", ring_exit: "take the {nth} exit", ring_on: "continue"
+  },
+  am: {
+    depart: "ጉዞ ይጀምሩ", depart_to: "ወደ {to} አቅጣጫ ይሂዱ",
+    pass: "በ{at} በኩል ይለፉ",
+    arrive: "መድረሻዎ ደርሰዋል", arrive_near: "መድረሻዎ ደርሰዋል፤ {at} አካባቢ ነው",
+    at: "{at} ሲደርሱ {act}", then_to: "{text}፤ ከዚያ ወደ {to} ይሂዱ",
+    turn_to: { left: "ወደ ግራ ታጥፈው ወደ {to} ይሂዱ", right: "ወደ ቀኝ ታጥፈው ወደ {to} ይሂዱ" },
+    ring: "አደባባዩ ላይ {act}", ring_at: "{at} ሲደርሱ {act}",
+    ring_name: "{at} አደባባይ",                 // "ጦር ሃይሎች" -> "ጦር ሃይሎች አደባባይ" (unless the name already says so)
+    ring_act: { straight: "ቀጥ ብለው ይለፉ", left: "ወደ ግራ ይታጠፉ", right: "ወደ ቀኝ ይታጠፉ", back: "አደባባዩን ዞረው ይመለሱ" },
+    ring_act_to: { straight: "ቀጥ ብለው ወደ {to} ይሂዱ", left: "ወደ ግራ ታጥፈው ወደ {to} ይሂዱ", right: "ወደ ቀኝ ታጥፈው ወደ {to} ይሂዱ" },
+    ring_keep: { left: "በግራ በኩል ያለውን መንገድ ይያዙ", right: "በቀኝ በኩል ያለውን መንገድ ይያዙ" },
+    ring_nth: "{act} ({nth}ው መውጫ)", ring_exit: "በ{nth}ው መውጫ ይውጡ", ring_on: "ይቀጥሉ"
   }
-  return (am ? RING_AM : RING_EN)[t.dir] +
-         (t.unclear && t.exit ? (am ? ` (${t.exit}ኛ መውጫ)` : ` (${ordinalEn(t.exit)} exit)`) : "");
-}
+};
+const fillT = (tpl, v) => tpl.replace(/\{(\w+)\}/g, (_, k) => (v[k] != null ? v[k] : ""));
 function junctionText(row) {
-  const m = row.maneuver || {}, j = row.junction, am = uiLang() === "am";
-  const nm = j ? junctionLabel(j) : "", tw = row.toward ? `<b>${esc(row.toward)}</b>` : "";
-  if (row.type === "pass")   return am ? `በ${nm} በኩል ይቀጥሉ` : `Continue through ${nm}`;
-  if (row.type === "depart") return am ? (tw ? `ወደ ${tw} አቅጣጫ ጉዞ ይጀምሩ` : "ጉዞ ይጀምሩ") : (tw ? `Head toward ${tw}` : "Head out");
-  if (row.type === "arrive") return am ? "መድረሻዎ ደርሰዋል" + (j ? `፣ ${nm} አቅራቢያ` : "")
-                                       : "Arrive at your destination" + (j ? `, near ${nm}` : "");
-  const mod = m.modifier || "", ring = m.type === "roundabout" || m.type === "rotary" || m.type === "roundabout turn";
-  let text;
-  if (am) {
-    const act = m.type === "roundabout turn" ? `ወደ ${MOD_AM[mod] || mod} ይታጠፉ` : ring ? ringText(row, true) : maneuverText(m, "");
-    text = (j ? `${nm} ላይ፣ ` : "") + (ring ? "በዙሪያ መንገዱ " : "") + act + (tw ? `፣ ወደ ${tw} አቅጣጫ` : "");
+  const lang = uiLang(), L = JTXT[lang], m = row.maneuver || {}, j = row.junction, mod = m.modifier || "";
+  const at = j ? junctionLabel(j) : "", to = row.toward ? `<b>${esc(row.toward)}</b>` : "";
+  if (row.type === "pass")   return fillT(L.pass, { at });
+  if (row.type === "depart") return to ? fillT(L.depart_to, { to }) : L.depart;
+  if (row.type === "arrive") return j ? fillT(L.arrive_near, { at }) : L.arrive;
+
+  const nth = m.exit ? (lang === "am" ? m.exit + "ኛ" : ordinalEn(m.exit)) : "";
+  const ring = m.type === "roundabout" || m.type === "rotary" || m.type === "roundabout turn";
+  // A mini-roundabout arrives from OSRM as a turn with a modifier — word it like the others.
+  const t = row.turn || (m.type !== "roundabout turn" ? null :
+    { dir: mod.indexOf("uturn") >= 0 ? "back" : mod.indexOf("left") >= 0 ? "left" : mod.indexOf("right") >= 0 ? "right" : "straight" });
+  let act, text, towardSaid = false;                 // towardSaid: `act` already ends in "… toward {to}"
+  if (ring) {
+    if (!t) act = nth ? fillT(L.ring_exit, { nth }) : L.ring_on;
+    else if (t.unclear && t.dir === "straight") act = L.ring_keep[t.side === "right" ? "left" : "right"];   // two exits lead ahead — ours is the far one
+    else if (to && !t.unclear && L.ring_act_to && L.ring_act_to[t.dir]) { act = fillT(L.ring_act_to[t.dir], { to }); towardSaid = true; }
+    else { act = L.ring_act[t.dir]; if (t.unclear && nth) act = fillT(L.ring_nth, { act, nth }); }
+    const says = j && /አደባባይ|ማዞሪያ|square|roundabout/i.test(j.name + " " + (j.alt || ""));
+    text = !j ? fillT(L.ring, { act }) : fillT(L.ring_at, { at: L.ring_name && !says ? fillT(L.ring_name, { at }) : at, act });
   } else {
-    const act = m.type === "roundabout turn" ? `turn ${MOD_EN[mod] || mod}` : ring ? ringText(row, false) : maneuverText(m, "");
-    const at = j ? `At ${nm}, ` : ring ? "At the roundabout, " : "";
-    text = at + (at ? act[0].toLowerCase() + act.slice(1) : act) + (tw ? ` toward ${tw}` : "");
+    if (to && L.turn_to && L.turn_to[mod] && (m.type === "turn" || m.type === "end of road")) { act = fillT(L.turn_to[mod], { to }); towardSaid = true; }
+    else act = maneuverText(m, "");
+    text = j ? fillT(L.at, { at, act: act[0].toLowerCase() + act.slice(1) }) : act;
   }
-  return text;
+  return to && !towardSaid ? fillT(L.then_to, { text, to }) : text;
 }
 function renderJunctionSteps(route) {
   const lang = uiLang(), names = junctionNames(route);
