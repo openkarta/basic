@@ -10,6 +10,7 @@
      fromPhoton(features, lang) names the stack already knows (OSM, via Photon)
      fromCustom(geojson, lang)  names you curate yourself (web/junctions.geojson)
      searchCustom(geojson, q)   …and finding those by name in the stop search box
+     rotaries / localName       named roundabouts, and their name in the UI language
      itinerary(route, entries)  the route as junction rows, ready to render
 
    Pure functions, no DOM and no network — index.html does the fetching and
@@ -284,15 +285,41 @@
     return { dir, exit: m.exit || null, unclear, side: left ? "left" : "right" };
   }
 
-  /* An OSRM route (steps=true, geometries=geojson) -> ordered rows (`lang` only
-     picks the script of a bilingual roundabout name):
+  /* Named roundabouts on the route. OSRM hands over OSM's default `name` only
+     ("Tewodros Square"), although OSM also holds name:am ("ቴዎድሮስ አደባባይ") — so
+     the caller looks each one up (see localName) and passes the result back to
+     itinerary() as `names`. -> [{ name, at: [lng,lat] }], one per distinct name. */
+  function rotaries(route) {
+    const out = [], seen = new Set();
+    for (const leg of route.legs || []) for (const st of leg.steps || []) {
+      if (!st.rotary_name || seen.has(st.rotary_name)) continue;
+      seen.add(st.rotary_name);
+      out.push({ name: st.rotary_name, at: st.maneuver.location });
+    }
+    return out;
+  }
+  // From Photon's search results for a roundabout's name: the name of the road
+  // feature standing at `at`, if it is written in the script `lang` reads.
+  function localName(features, at, lang) {
+    const script = lang === "am" ? ETHIOPIC : LATIN;
+    for (const f of features || []) {
+      const p = f.properties || {}, g = f.geometry || {};
+      if (p.osm_key !== "highway" || p.osm_value === "bus_stop" || !p.name || !g.coordinates) continue;
+      if (dist(at, g.coordinates) <= 400 && script.test(p.name)) return p.name;
+    }
+    return null;
+  }
+
+  /* An OSRM route (steps=true, geometries=geojson) -> ordered rows. `lang` picks
+     the script of a bilingual roundabout name; `names` maps a roundabout's OSRM
+     name to its name in that language (optional, see rotaries):
        { type: "depart" | "maneuver" | "pass" | "arrive",
          maneuver,            OSRM StepManeuver (absent on "pass")
          turn,                roundabouts only: which way to leave it (see ringTurn)
          junction,            { name, alt, kind, src, d, lng, lat } or null when unnamed
          toward,              name of the next named junction, when worth saying
          at: [lng,lat], dist  metres to the next row (null on arrival) }             */
-  function itinerary(route, entries, lang) {
+  function itinerary(route, entries, lang, names) {
     const grid = buildIndex(entries);
     const events = [];
     let s0 = 0;                                                  // metres travelled at the step's start
@@ -315,7 +342,7 @@
             junction = pick(grid, pts, true, 1);
             // A named roundabout (OSRM rotary_name) beats anything merely standing next to
             // it — but that neighbour is often the name people use, so keep it as `alt`.
-            const own = st.rotary_name && cleanName(st.rotary_name, "square", lang);
+            const own = st.rotary_name && cleanName((names && names[st.rotary_name]) || st.rotary_name, "square", lang);
             if (own && !(junction && KINDS[junction.kind].rank <= 1)) {
               const alt = junction && junction.key !== keyOf(own) ? junction : null;
               junction = { name: own, key: keyOf(own), kind: "square", src: "OSM roundabout name",
@@ -393,7 +420,7 @@
     return rows;
   }
 
-  const api = { KINDS, PHOTON_TAGS, corridor, fromPhoton, fromCustom, searchCustom, itinerary, cleanName, dist };
+  const api = { KINDS, PHOTON_TAGS, corridor, fromPhoton, fromCustom, searchCustom, rotaries, localName, itinerary, cleanName, dist };
   if (typeof module === "object" && module.exports) module.exports = api;
   else root.OKJunctions = api;
 })(typeof self !== "undefined" ? self : this);

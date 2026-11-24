@@ -163,8 +163,10 @@ map labels and every other OSM user after the next data refresh.
 - **Long routes.** The lookups are capped, so intercity routes name towns and
   major junctions rather than every neighbourhood.
 - **Language.** A name is shown in the UI language where OSM has `name:en` /
-  `name:am` for it. Where it does not, the name is borrowed from a neighbour
-  named after the same place (the taxi stand `Tor Hailoch` reads **ጦር ሃይሎች**
-  because the suburb beside it carries both spellings). Roundabout names taken
-  from the routing graph (`Tewodros Square`) only exist in OSM's default
-  `name` — add `name:am` in `web/junctions.geojson` or in OSM to localise them.
+  `name:am` for it. Where a feature carries one script only, the name is
+  borrowed from a neighbour named after the same place (the taxi stand
+  `Tor Hailoch` reads **ጦር ሃይሎች** because the suburb beside it carries both
+  spellings). Named roundabouts come from the routing graph in OSM's default
+  `name` only, so each one is looked up in Photon for its `name:am` /
+  `name:en` (`Tewodros Square` → **ቴዎድሮስ አደባባይ**). A name OSM holds in one
+  script only, with no such neighbour, stays in that script.
