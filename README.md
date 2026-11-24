@@ -198,9 +198,11 @@ disables — expect a few seconds of search downtime during a reindex).
   is shareable in the URL (`?route=lng,lat;lng,lat;…`).
 - **Junction-based directions** — street names are rarely used on the ground
   here, so the directions are narrated by the **named junctions** the route runs
-  through ("At **Tor Hailoch**, take the 2nd exit toward **Coca**", "Continue
-  through **Molla Maru**") and those junctions are labelled on the route. The
-  route is still OSRM's; only the naming changes. Names come from
+  through ("At **Tor Hailoch**, go straight toward **Coca**", "Continue
+  through **Molla Maru**") and those junctions are labelled on the route.
+  Roundabouts are told by the way you leave them — left, right or straight —
+  not by counting exits. The route is still OSRM's; only the naming changes.
+  Names come from
   `web/junctions.geojson` (yours — always wins, and searchable as stops) and
   from what OSM has at each junction (squares, neighbourhoods, minibus
   terminals), read live from Photon. A **Junctions / Streets** switch keeps the

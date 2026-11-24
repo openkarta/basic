@@ -206,10 +206,68 @@
            (m.type === "continue" && (!m.modifier || m.modifier === "straight"));
   }
 
+  /* ----------------------- roundabouts by direction ------------------------ */
+  /* "Take the 3rd exit" makes the driver count arms. People say which WAY to
+     leave — left, right or straight — reading the roundabout as a plain
+     crossroads (Waze does this for regular roundabouts; TomTom classes every
+     roundabout exit as straight / left / right / back). The way is the angle
+     between the road you arrive on and the road you leave on, measured a little
+     back from the ring: at the ring itself both roads flare, which skews OSRM's
+     own bearings by 30-40 degrees (its "3rd exit" is often simply straight on). */
+  function bearing(a, b) {
+    const x = (b[0] - a[0]) * RAD * Math.cos((a[1] + b[1]) * 0.5 * RAD), y = (b[1] - a[1]) * RAD;
+    return (Math.atan2(x, y) / RAD + 360) % 360;
+  }
+  const turnOf = (deg) => (((deg % 360) + 540) % 360) - 180;      // -180..180, right is positive
+  // The nearest of the four ways a crossroads offers.
+  const wayOf = (t) => (Math.abs(t) <= 45 ? "straight" : Math.abs(t) >= 135 ? "back" : t > 0 ? "right" : "left");
+  // Heading of `line` — which starts at the ring and leads away from it — taken
+  // over 20-70 m so the flare at the ring does not count. null when too short to tell.
+  function headingAway(line) {
+    const cum = [0];
+    for (let k = 1; k < line.length; k++) cum.push(cum[k - 1] + dist(line[k - 1], line[k]));
+    const len = cum[cum.length - 1];
+    if (!(len >= 8)) return null;
+    const at = (d) => {
+      let k = 1;
+      while (k < line.length - 1 && cum[k] < d) k++;
+      const t = cum[k] > cum[k - 1] ? Math.min(1, Math.max(0, (d - cum[k - 1]) / (cum[k] - cum[k - 1]))) : 0;
+      return [line[k - 1][0] + (line[k][0] - line[k - 1][0]) * t, line[k - 1][1] + (line[k][1] - line[k - 1][1]) * t];
+    };
+    return bearing(at(len > 40 ? 20 : 0), at(Math.min(len, 70)));
+  }
+  /* How the ring step steps[i] leaves the roundabout:
+       { dir: "straight" | "left" | "right" | "back", exit: OSRM's exit number,
+         unclear: an exit passed earlier points the same way, so the word alone
+                  would send the driver out too early, side: driving side }
+     null when the route does not leave the ring (it ends on it). */
+  function ringTurn(steps, i) {
+    const st = steps[i], m = st.maneuver, out = steps[i + 1];
+    if (!out || !out.maneuver || !RING_EXIT[out.maneuver.type]) return null;
+    const line = (s) => (s && s.geometry && s.geometry.coordinates) || [];
+    const back = headingAway(line(steps[i - 1]).slice().reverse());   // from the ring, back down the approach
+    const away = headingAway(line(out));
+    const hin = back == null ? m.bearing_before : (back + 180) % 360;
+    const hout = away == null ? out.maneuver.bearing_after : away;
+    if (!isFinite(hin) || !isFinite(hout)) return null;
+    const dir = wayOf(turnOf(hout - hin));
+    const left = st.driving_side === "left";
+    const lean = left ? -15 : 15;                                // an exit's first metres still follow the ring
+    let unclear = false;
+    for (const x of st.intersections || []) {
+      (x.bearings || []).forEach((b, k) => {                     // arms we drive past: not our way in, not the ring
+        if (k === x.in || k === x.out || !(x.entry || [])[k]) return;
+        if (wayOf(turnOf(b - hin + lean)) === dir) unclear = true;
+      });
+    }
+    return { dir, exit: m.exit || null, unclear, side: left ? "left" : "right" };
+  }
+
   /* An OSRM route (steps=true, geometries=geojson) -> ordered rows (`lang` only
      picks the script of a bilingual roundabout name):
        { type: "depart" | "maneuver" | "pass" | "arrive",
          maneuver,            OSRM StepManeuver (absent on "pass")
+         turn,                roundabouts only: which way to leave it (see ringTurn)
          junction,            { name, alt, kind, src, d, lng, lat } or null when unnamed
          toward,              name of the next named junction, when worth saying
          at: [lng,lat], dist  metres to the next row (null on arrival) }             */
@@ -245,7 +303,7 @@
             }
           }
           events.push({ type: m.type === "depart" || m.type === "arrive" ? m.type : "maneuver",
-                        maneuver: m, junction, at: m.location, pts, s: s0 });
+                        maneuver: m, turn: ring ? ringTurn(steps, i) : null, junction, at: m.location, pts, s: s0 });
         }
 
         // Named junctions driven straight through. (Not on the ring: it is one junction.)
