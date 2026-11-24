@@ -10,6 +10,7 @@ frontend encodes state.
 | `base` | query | `?base=satellite` | Basemap: `street` (default) or `satellite`. |
 | `lang` | query | `?lang=am` | Map + UI language: `default` · `en` · `am`. |
 | `route` | query | `?route=38.74,9.03;38.95,8.85;39.27,8.54` | Ordered trip stops, `lon,lat` separated by `;` (2+ = origin…waypoints…destination). Restores the markers and recomputes the route. |
+| `dir` | query | `?dir=streets` | Directions style: by named junction (default, omitted) or classic `streets` turn-by-turn. See [Junction-based directions](junctions.md). |
 
 **Use case:** share a planned multi-stop trip, on the satellite basemap with
 Amharic labels, framed exactly where you left it:

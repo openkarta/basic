@@ -37,6 +37,10 @@ curl -s "http://localhost:8000/osrm/route/v1/driving/\
 Returns `routes[]` (each with `distance` m, `duration` s, `geometry`, and
 `legs[].steps[].maneuver`).
 
+> Steps name the **street** you turn onto. The trip planner re-reads the same
+> response by **named junction** instead — see
+> [Junction-based directions](junctions.md).
+
 ---
 
 ## `nearest` — snap to the road network

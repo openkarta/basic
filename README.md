@@ -196,9 +196,18 @@ disables — expect a few seconds of search downtime during a reindex).
   set it auto-routes via OSRM (multi-leg), showing distance, drive-time and a
   collapsible **turn-by-turn** list (icons + connector rail). The full stop list
   is shareable in the URL (`?route=lng,lat;lng,lat;…`).
+- **Junction-based directions** — street names are rarely used on the ground
+  here, so the directions are narrated by the **named junctions** the route runs
+  through ("At **Tor Hailoch**, take the 2nd exit toward **Coca**", "Continue
+  through **Molla Maru**") and those junctions are labelled on the route. The
+  route is still OSRM's; only the naming changes. Names come from
+  `web/junctions.geojson` (yours — always wins, and searchable as stops) and
+  from what OSM has at each junction (squares, neighbourhoods, minibus
+  terminals), read live from Photon. A **Junctions / Streets** switch keeps the
+  classic view one click away (`?dir=streets`). See `docs/junctions.md`.
 - **Shareable URLs** — the whole app state lives in the URL: camera
-  (zoom/lat/lng) in the `#hash` (MapLibre's built-in hash), and `base`, `lang`
-  and `route` (origin;waypoints;destination) as query params. Copy the
+  (zoom/lat/lng) in the `#hash` (MapLibre's built-in hash), and `base`, `lang`,
+  `dir` and `route` (origin;waypoints;destination) as query params. Copy the
   link to reproduce the exact view, basemap, label language and computed route.
   Example: `?base=satellite&lang=am&route=38.7,9.0;37.4,11.6#8/10.3/37.8`
 - **Collapsible panel** — the overlay collapses to a compact brand bar to free the map.
@@ -251,6 +260,8 @@ These were required to make the stack actually run out of the box:
 ├── docs/                       # docsify API reference (every endpoint) — served at :8000/docs
 ├── web/
 │   ├── index.html              # MapLibre GL showcase (single file)
+│   ├── junctions.js            # junction-based directions: names an OSRM route by junction
+│   ├── junctions.geojson       # your own junction names (optional; overrides OSM)
 │   ├── styles/                 # Bright + Satellite-Hybrid (built from Bright, → our /tiles/)
 │   ├── vendor/                 # self-hosted maplibre-gl (js + css); search uses Photon directly
 │   ├── fonts/                  # self-hosted map glyphs (Noto Sans, incl. Ethiopic)

@@ -10,4 +10,5 @@
   - [Optimization · VROOM](optimization.md)
 
 - **App**
+  - [Junction-based directions](junctions.md)
   - [Shareable URL state](app-state.md)
